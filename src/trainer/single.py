@@ -15,7 +15,7 @@ from trainer.memory import Memory
 from trainer.model import DQN
 from trainer.process import Transform, Stacking, get_prediction_and_target
 
-BATCH_SIZE = 28
+BATCH_SIZE = 32
 GAMMA = 0.99
 EPS_START = 1.0
 EPS_END = 0.05
@@ -90,7 +90,10 @@ def main():
                 next_stacked_obs = stacking(next_transformed_obs)
 
             transition = Transition(
-                transformed_obs, action, reward, next_transformed_obs)
+                transformed_obs.to("cpu"), 
+                action.to("cpu"),
+                reward.to("cpu"),
+                next_transformed_obs.to("cpu"))
             memory.add(transition)
 
             stacked_obs = next_stacked_obs
@@ -142,7 +145,10 @@ def main():
                             next_stacked_obs = stacking(next_transformed_obs)
 
                         transition = Transition(
-                            transformed_obs, action, reward, next_transformed_obs)
+                            transformed_obs.to("cpu"), 
+                            action.to("cpu"),
+                            reward.to("cpu"),
+                            next_transformed_obs.to("cpu"))
                         memory.add(transition)
 
                         stacked_obs = next_stacked_obs

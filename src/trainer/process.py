@@ -86,7 +86,7 @@ def get_prediction_and_target(batch, online_dqn, target_dqn, batch_size=1, gamma
     non_final_mask = torch.tensor(
         non_final_mask, dtype=torch.bool, device=device)
     non_final_next_states = torch.cat(
-        [s for s in batch.next_state if s is not None])
+        [s for s in batch.next_state if s is not None]).to(device)
 
     state_batch = torch.cat(batch.state).to(device)
     action_batch = torch.cat(batch.action).to(device)
