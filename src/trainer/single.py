@@ -160,6 +160,9 @@ def main():
                         'model_state_dict': online_dqn.state_dict(),
                         'optimizer_state_dict': optimizer.state_dict()
                     }, "checkpoints/model.pt")
+                
+                # IMPORTANT: Stop the episode when done
+                break
 
 
 if __name__ == '__main__':
