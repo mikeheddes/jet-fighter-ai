@@ -81,9 +81,10 @@ class Stacking:
         return transitions
 
 
-def get_q_values_and_expectation(batch, model, batch_size=1, gamma=0.99, device=None):
+def get_prediction_and_target(batch, online_dqn, target_dqn, batch_size=1, gamma=0.99, device=None):
     non_final_mask = [s is not None for s in batch.next_state]
-    non_final_mask = torch.tensor(non_final_mask, dtype=torch.bool, device=device)
+    non_final_mask = torch.tensor(
+        non_final_mask, dtype=torch.bool, device=device)
     non_final_next_states = torch.cat(
         [s for s in batch.next_state if s is not None])
 
@@ -91,12 +92,16 @@ def get_q_values_and_expectation(batch, model, batch_size=1, gamma=0.99, device=
     action_batch = torch.cat(batch.action).to(device)
     reward_batch = torch.cat(batch.reward).to(device)
 
-    q_values = model(state_batch).gather(1, action_batch)
+    # Current prediction
+    q_values = online_dqn(state_batch).gather(1, action_batch)
 
-    next_state_values = torch.zeros(batch_size, device=device)
-    next_state_values[non_final_mask] = model(
-        non_final_next_states).amax(1).detach()
-    expected_q_values = (next_state_values * gamma) + reward_batch
-    expected_q_values = expected_q_values.unsqueeze(1)
+    # Calculate target
+    with torch.no_grad():
+        non_final_next_actions = online_dqn(
+            non_final_next_states).argmax(1, keepdims=True)
+        next_state_values = torch.zeros((batch_size, 1), device=device)
+        next_state_values[non_final_mask] = target_dqn(
+            non_final_next_states).gather(1, non_final_next_actions)
+        expected_q_values = reward_batch + (next_state_values * gamma)
 
     return q_values, expected_q_values

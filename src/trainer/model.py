@@ -14,18 +14,30 @@ class DQN(nn.Module):
         H1 = (H + 2 * 1 - 1 * (3 - 1) - 1) // 1 + 1
         W1 = (W + 2 * 1 - 1 * (3 - 1) - 1) // 1 + 1
         self.conv2 = nn.Conv2d(
-            in_channels=32, out_channels=64, kernel_size=3, padding=1)
+            in_channels=32, out_channels=32, kernel_size=3, padding=1)
         H2 = (H1 + 2 * 1 - 1 * (3 - 1) - 1) // 1 + 1
         W2 = (W1 + 2 * 1 - 1 * (3 - 1) - 1) // 1 + 1
-        self.fc1 = nn.Linear(64 * H2 * W2, 48)
-        self.fc2 = nn.Linear(48, 24)
-        self.fc3 = nn.Linear(24, num_actions)
+        self.fc1 = nn.Linear(32 * H2 * W2, 512)
+
+        # Value layers
+        self.vl1 = nn.Linear(512, 128)
+        self.vl2 = nn.Linear(128, 1)
+
+        # Action advantage layers
+        self.al1 = nn.Linear(512, 128)
+        self.al2 = nn.Linear(128, num_actions)
 
     def forward(self, x):
         out = F.relu(self.conv1(x))
         out = F.relu(self.conv2(out))
         out = out.reshape(out.size(0), -1)
         out = F.relu(self.fc1(out))
-        out = F.relu(self.fc2(out))
-        out = self.fc3(out)
-        return out
+
+        value = F.relu(self.vl1(out))
+        value = self.vl2(value)
+
+        advantage = F.relu(self.al1(out))
+        advantage = self.al2(advantage)
+        mean_advantage = advantage.mean(1, keepdims=True)
+
+        return value + advantage - mean_advantage

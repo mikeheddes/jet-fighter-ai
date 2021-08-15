@@ -1,3 +1,4 @@
+import os
 import random
 from collections import namedtuple
 from itertools import count
@@ -12,28 +13,40 @@ from torchvision.transforms import transforms
 from trainer.env import Environment
 from trainer.memory import Memory
 from trainer.model import DQN
-from trainer.process import Transform, Stacking, get_q_values_and_expectation
+from trainer.process import Transform, Stacking, get_prediction_and_target
 
 BATCH_SIZE = 28
 GAMMA = 0.99
 EPS_START = 1.0
 EPS_END = 0.05
 EPS_DECAY = 200
-LEARNING_RATE = 0.0001
+LEARNING_RATE = 0.0005
 FRAME_STACKING = 4
 NUM_ACTIONS = 4
 MEMORY_CAPACITY = 100_000
+TARGET_NET_UPDATE_FREQ = 1000
 
 Transition = namedtuple(
     'Transition', ('state', 'action', 'reward', 'next_state'))
 
 
+def copy_model_state(from_model: torch.nn.Module, to_model: torch.nn.Module):
+    state_dict = from_model.state_dict()
+    to_model.load_state_dict(state_dict)
+
+
+
 def main():
+    os.makedirs("./checkpoints", exist_ok=True)
+
     device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
     print("Using device:", device)
 
-    dqn = DQN((FRAME_STACKING, 90, 120), NUM_ACTIONS).to(device)
-    optimizer = optim.RMSprop(dqn.parameters(), lr=LEARNING_RATE)
+    online_dqn = DQN((FRAME_STACKING, 90, 120), NUM_ACTIONS).to(device)
+    target_dqn = DQN((FRAME_STACKING, 90, 120), NUM_ACTIONS).to(device)
+    copy_model_state(online_dqn, target_dqn)
+
+    optimizer = optim.RMSprop(online_dqn.parameters(), lr=LEARNING_RATE)
     memory = Memory(MEMORY_CAPACITY)
     toTensor = T.ToTensor()
     transform = Transform((90, 120))
@@ -45,7 +58,7 @@ def main():
         eps_threshold = EPS_END + (EPS_START - EPS_END) * part
         if sample > eps_threshold:
             with torch.no_grad():
-                return dqn(state).argmax().view(1, 1)
+                return online_dqn(state).argmax().view(1, 1)
         else:
             return torch.randint(0, NUM_ACTIONS, (1, 1), device=device, dtype=torch.long)
 
@@ -67,7 +80,7 @@ def main():
 
             # Play an action in the game and get the next observation
             next_raw_obs, reward, done = env.step(action.item())
-            reward = torch.tensor([reward], dtype=torch.float, device=device)
+            reward = torch.tensor([[reward]], dtype=torch.float, device=device)
 
             if done:
                 next_stacked_obs = None
@@ -82,20 +95,26 @@ def main():
 
             stacked_obs = next_stacked_obs
 
-            if len(memory) < 1000:
+            if len(memory) < 100:
                 continue
 
             transitions = stacking.from_memory(memory, batch_size=BATCH_SIZE)
             batch = Transition(*zip(*transitions))
 
-            q_values, expected_q_values = get_q_values_and_expectation(
-                batch, dqn, batch_size=BATCH_SIZE, gamma=GAMMA, device=device)
+            q_values, expected_q_values = get_prediction_and_target(
+                batch, online_dqn, target_dqn, 
+                batch_size=BATCH_SIZE, gamma=GAMMA, device=device)
+
+            print(q_values.mean().item(), expected_q_values.mean().item())
 
             loss = F.mse_loss(q_values, expected_q_values)
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+
+            if step % TARGET_NET_UPDATE_FREQ == (TARGET_NET_UPDATE_FREQ - 1):
+                copy_model_state(online_dqn, target_dqn)
 
             if done:
                 if i_episode % 5 == 4:
@@ -108,7 +127,7 @@ def main():
 
                     mean_max_q_value = 0
                     for t in count():
-                        q_values = dqn(stacked_obs)
+                        q_values = online_dqn(stacked_obs)
                         action = q_values.argmax().view(1, 1)
                         mean_max_q_value += q_values.max().item()
 
@@ -140,10 +159,9 @@ def main():
                 if i_episode % 50 == 49:
                     torch.save({
                         'steps': step,
-                        'model_state_dict': dqn.state_dict(),
+                        'model_state_dict': online_dqn.state_dict(),
                         'optimizer_state_dict': optimizer.state_dict()
                     }, "checkpoints/model.pt")
-                break
 
 
 if __name__ == '__main__':
