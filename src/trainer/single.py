@@ -19,7 +19,7 @@ GAMMA = 0.99
 EPS_START = 1.0
 EPS_END = 0.05
 EPS_DECAY = 200
-LEARNING_RATE = 0.001
+LEARNING_RATE = 0.0001
 FRAME_STACKING = 4
 NUM_ACTIONS = 4
 MEMORY_CAPACITY = 100_000
@@ -133,9 +133,8 @@ def main():
                         if done:
                             break
 
-                    episode_duration = t + 1
                     mean_q_value = mean_max_q_value / (t + 1)
-                    print("episode duration", episode_duration,
+                    print("episode score:", env.game.score,
                           f"\tmean q-value: {mean_q_value:.1f}", "\tat episode", i_episode)
 
                 if i_episode % 50 == 49:
