@@ -5,19 +5,27 @@ import torch.nn.functional as F
 import torchvision.transforms as T
 
 
+def get_conv_output_size(size_in, kernel_size, padding=0, stride=1, dilation=1):
+    return (size_in + 2 * padding - dilation * (kernel_size - 1) - 1) // stride + 1
+
+
+
 class DQN(nn.Module):
     def __init__(self, frame_shape, num_actions):
         super(DQN, self).__init__()
         C, H, W = frame_shape
+
         self.conv1 = nn.Conv2d(
-            in_channels=C, out_channels=32, kernel_size=3, padding=1)
-        H1 = (H + 2 * 1 - 1 * (3 - 1) - 1) // 1 + 1
-        W1 = (W + 2 * 1 - 1 * (3 - 1) - 1) // 1 + 1
+            in_channels=C, out_channels=16, kernel_size=8, stride=4, padding=2)
+        H = get_conv_output_size(H, 8, stride=4, padding=2)
+        W = get_conv_output_size(W, 8, stride=4, padding=2)
+
         self.conv2 = nn.Conv2d(
-            in_channels=32, out_channels=32, kernel_size=3, padding=1)
-        H2 = (H1 + 2 * 1 - 1 * (3 - 1) - 1) // 1 + 1
-        W2 = (W1 + 2 * 1 - 1 * (3 - 1) - 1) // 1 + 1
-        self.fc1 = nn.Linear(32 * H2 * W2, 512)
+            in_channels=16, out_channels=32, kernel_size=4, stride=2, padding=1)
+        H = get_conv_output_size(H, 4, stride=2, padding=1)
+        W = get_conv_output_size(W, 4, stride=2, padding=1)
+
+        self.fc1 = nn.Linear(32 * H * W, 512)
 
         # Value layers
         self.vl1 = nn.Linear(512, 128)

@@ -24,7 +24,7 @@ LEARNING_RATE = 0.0005
 FRAME_STACKING = 4
 NUM_ACTIONS = 4
 MEMORY_CAPACITY = 100_000
-TARGET_NET_UPDATE_FREQ = 1000
+TARGET_NET_UPDATE_FREQ = 500
 
 Transition = namedtuple(
     'Transition', ('state', 'action', 'reward', 'next_state'))
@@ -95,7 +95,7 @@ def main():
 
             stacked_obs = next_stacked_obs
 
-            if len(memory) < 100:
+            if len(memory) < 1000:
                 continue
 
             transitions = stacking.from_memory(memory, batch_size=BATCH_SIZE)
