@@ -1,0 +1,7 @@
+torch
+torchvision
+moderngl
+moderngl_window
+numpy
+Pillow
+pyrr
