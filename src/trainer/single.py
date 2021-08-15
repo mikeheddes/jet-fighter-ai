@@ -105,8 +105,6 @@ def main():
                 batch, online_dqn, target_dqn, 
                 batch_size=BATCH_SIZE, gamma=GAMMA, device=device)
 
-            print(q_values.mean().item(), expected_q_values.mean().item())
-
             loss = F.mse_loss(q_values, expected_q_values)
 
             optimizer.zero_grad()
