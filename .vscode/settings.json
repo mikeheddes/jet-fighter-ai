@@ -1,0 +1,8 @@
+{
+  "python.autoComplete.extraPaths": [
+    "src/trainer"
+  ],
+  "python.analysis.extraPaths": [
+    "src/trainer"
+  ]
+}
