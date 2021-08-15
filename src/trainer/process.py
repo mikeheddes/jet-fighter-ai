@@ -56,7 +56,7 @@ class Stacking:
             idx = memory.sample()
             min_idx = max(idx - self.num_frames + 1, 0)
             transition_stack = memory[min_idx:idx + 1]
-            
+
             if len(transition_stack) > 1:
                 for i in range(len(transition_stack) - 2, -1, -1):
                     if transition_stack[i].next_state == None:
@@ -83,7 +83,7 @@ class Stacking:
 
 def get_q_values_and_expectation(batch, model, batch_size=1, gamma=0.99, device=None):
     non_final_mask = [s is not None for s in batch.next_state]
-    non_final_mask = torch.BoolTensor(non_final_mask, device=device)
+    non_final_mask = torch.tensor(non_final_mask, dtype=torch.bool, device=device)
     non_final_next_states = torch.cat(
         [s for s in batch.next_state if s is not None])
 
