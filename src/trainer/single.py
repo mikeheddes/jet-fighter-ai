@@ -30,6 +30,7 @@ Transition = namedtuple(
 
 def main():
     device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
+    print("Using device:", device)
 
     dqn = DQN((FRAME_STACKING, 90, 120), NUM_ACTIONS).to(device)
     optimizer = optim.RMSprop(dqn.parameters(), lr=LEARNING_RATE)
