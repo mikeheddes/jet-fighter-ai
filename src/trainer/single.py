@@ -131,7 +131,7 @@ def main():
 
                         next_raw_obs, reward, done = env.step(action.item())
                         reward = torch.tensor(
-                            [reward], dtype=torch.float, device=device)
+                            [[reward]], dtype=torch.float, device=device)
 
                         if done:
                             next_stacked_obs = None
