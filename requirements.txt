@@ -5,3 +5,4 @@ moderngl_window
 numpy
 Pillow
 pyrr
+psutil
