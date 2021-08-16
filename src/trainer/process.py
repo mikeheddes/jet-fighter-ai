@@ -11,7 +11,7 @@ class Transform(torch.nn.Module):
     def __init__(self, frame_size):
         super().__init__()
         self.transform = torch.nn.Sequential(
-            T.Grayscale(),
+            # T.Grayscale(),
             T.Resize(frame_size))
 
     def forward(self, x):
