@@ -70,7 +70,7 @@ def main():
     step = 0
     for i_episode in range(NUM_EPISODES):
         print(f"Start episode {i_episode}")
-        print(f"Using {torch.cuda.memory_allocated() / 1e6:.2f} MB on GPU")
+        print(f"Using {torch.cuda.memory_allocated(device) / 1e6:.2f} MB on GPU")
         process = psutil.Process(os.getpid())
         print(f"Using {process.memory_info().rss / 1e6:.2f} MB on CPU")
 
