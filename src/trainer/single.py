@@ -2,6 +2,9 @@ import os
 import random
 from collections import namedtuple
 from itertools import count
+import gc
+import os
+import psutil
 
 import torch
 import torch.nn as nn
@@ -66,7 +69,10 @@ def main():
     env = Environment()
     step = 0
     for i_episode in range(NUM_EPISODES):
-        print(f"start episode {i_episode}")
+        print(f"Start episode {i_episode}")
+        print(f"Using {torch.cuda.memory_allocated() / 1e6:.2f} MB on GPU")
+        process = psutil.Process(os.getpid())
+        print(f"Using {process.memory_info().rss / 1e6:.2f} MB on CPU")
 
         # Get the initial observation from the game
         raw_obs = env.reset()
@@ -178,6 +184,8 @@ def main():
 
                     # IMPORTANT: Stop the episode when done
                     break
+            
+            gc.collect()
 
             if done:
                 break
