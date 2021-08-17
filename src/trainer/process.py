@@ -2,9 +2,7 @@ from collections import deque, namedtuple
 import torch
 import torchvision.transforms as T
 
-
-Transition = namedtuple(
-    'Transition', ('state', 'action', 'reward', 'next_state'))
+from trainer.types import Transition
 
 
 class Transform(torch.nn.Module):

@@ -7,16 +7,15 @@ import os
 import psutil
 
 import torch
-import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 import torchvision.transforms as T
-from torchvision.transforms import transforms
 
 from trainer.env import Environment
 from trainer.memory import Memory
 from trainer.model import DQN
 from trainer.process import Transform, Stacking, get_prediction_and_target
+from trainer.types import Transition
 
 BATCH_SIZE = 32
 GAMMA = 0.99
@@ -26,14 +25,10 @@ EPS_DECAY_STEPS = 5_000_000
 LEARNING_RATE = 0.0005
 FRAME_STACKING = 4
 NUM_ACTIONS = 4
-MEMORY_CAPACITY = 100_000
+MEMORY_CAPACITY = 1_000
 TARGET_NET_UPDATE_FREQ = 1000
 NUM_EPISODES = 15_000
 C, H, W = 3, 90, 120
-
-Transition = namedtuple(
-    'Transition', ('state', 'action', 'reward', 'next_state'))
-
 
 def copy_model_state(from_model: torch.nn.Module, to_model: torch.nn.Module):
     state_dict = from_model.state_dict()
@@ -68,11 +63,12 @@ def main():
 
     env = Environment()
     step = 0
+
     for i_episode in range(NUM_EPISODES):
-        print(f"Start episode {i_episode}")
-        print(f"Using {torch.cuda.memory_allocated(device) / 1e6:.2f} MB on GPU")
+        gpu_mem = torch.cuda.memory_allocated(device) / 1e6
         process = psutil.Process(os.getpid())
-        print(f"Using {process.memory_info().rss / 1e6:.2f} MB on CPU")
+        cpu_mem = process.memory_info().rss / 1e6
+        print(f"Start episode {i_episode}, using {gpu_mem:.2f} MB GPU and {cpu_mem:.2f} MB CPU")
 
         # Get the initial observation from the game
         raw_obs = env.reset()
@@ -172,7 +168,7 @@ def main():
                                 break
 
                         mean_q_value = mean_max_q_value / (t + 1)
-                        print("episode score:", env.game.score,
+                        print("episode score:", str(env.game.score),
                               f"\tmean q-value: {mean_q_value:.1f}", "\tat episode", i_episode)
 
                     if i_episode % 50 == 49:
@@ -185,10 +181,10 @@ def main():
                     # IMPORTANT: Stop the episode when done
                     break
             
-            gc.collect()
-
             if done:
                 break
+
+        gc.collect()
 
 
 if __name__ == '__main__':

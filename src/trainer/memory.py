@@ -17,8 +17,8 @@ class Memory:
         else:
             self.data[self.write_index] = item
 
-        write_index = (self.write_index + 1) % self.capacity
-        if write_index == 0:
+        self.write_index = (self.write_index + 1) % self.capacity
+        if self.write_index == 0:
             self.wrap_arounds += 1
 
     def __getitem__(self, idx):
