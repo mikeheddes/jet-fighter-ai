@@ -124,6 +124,7 @@ def main():
                         mem_indices[batch_i], 
                         errors[batch_i].item())
 
+                is_weights = is_weights.to(device)
                 losses = loss_fn(pred, target) * is_weights
                 loss = losses.mean()
 
