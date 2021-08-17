@@ -1,6 +1,5 @@
 import os
 import random
-from collections import namedtuple
 from itertools import count
 import gc
 import os
@@ -8,27 +7,28 @@ import psutil
 
 import torch
 import torch.optim as optim
-import torch.nn.functional as F
 import torchvision.transforms as T
 
 from trainer.env import Environment
-from trainer.memory import Memory
+from trainer.prioritized_memory import Memory
 from trainer.model import DQN
 from trainer.process import Transform, Stacking, get_prediction_and_target
-from trainer.types import Transition
+from trainer.types import Transition, TransitionBatch
 
-BATCH_SIZE = 32
+BATCH_SIZE = 64
 GAMMA = 0.99
 EPS_START = 1.0
 EPS_END = 0.05
 EPS_DECAY_STEPS = 5_000_000
-LEARNING_RATE = 0.0005
+LEARNING_RATE = 0.00025
 FRAME_STACKING = 4
 NUM_ACTIONS = 4
 MEMORY_CAPACITY = 100_000
+MIN_MEMORY_SIZE = 10_000
 TARGET_NET_UPDATE_FREQ = 1000
 NUM_EPISODES = 15_000
 C, H, W = 3, 90, 120
+
 
 def copy_model_state(from_model: torch.nn.Module, to_model: torch.nn.Module):
     state_dict = from_model.state_dict()
@@ -46,6 +46,7 @@ def main():
     copy_model_state(online_dqn, target_dqn)
 
     optimizer = optim.RMSprop(online_dqn.parameters(), lr=LEARNING_RATE)
+    loss_fn = torch.nn.MSELoss(reduction='none')
     memory = Memory(MEMORY_CAPACITY)
     toTensor = T.ToTensor()
     transform = Transform((H, W))
@@ -68,7 +69,8 @@ def main():
         gpu_mem = torch.cuda.memory_allocated(device) / 1e6
         process = psutil.Process(os.getpid())
         cpu_mem = process.memory_info().rss / 1e6
-        print(f"Start episode {i_episode}, using {gpu_mem:.2f} MB GPU and {cpu_mem:.2f} MB CPU")
+        print(
+            f"Start episode {i_episode}, using {gpu_mem:.2f} MB GPU and {cpu_mem:.2f} MB CPU")
 
         # Get the initial observation from the game
         raw_obs = env.reset()
@@ -105,18 +107,25 @@ def main():
 
                 stacked_obs = next_stacked_obs
 
-                if len(memory) < 1000:
+                if len(memory) < MIN_MEMORY_SIZE:
                     continue
 
-                transitions = stacking.from_memory(
+                transitions, mem_indices, is_weights = stacking.from_memory(
                     memory, batch_size=BATCH_SIZE)
-                batch = Transition(*zip(*transitions))
+                batch = TransitionBatch(*zip(*transitions))
 
-                q_values, expected_q_values = get_prediction_and_target(
+                pred, target = get_prediction_and_target(
                     batch, online_dqn, target_dqn,
                     batch_size=BATCH_SIZE, gamma=GAMMA, device=device)
 
-                loss = F.mse_loss(q_values, expected_q_values)
+                errors = torch.abs(pred - target)
+                for batch_i in range(BATCH_SIZE):
+                    memory.update_priority(
+                        mem_indices[batch_i], 
+                        errors[batch_i].item())
+
+                losses = loss_fn(pred, target) * is_weights
+                loss = losses.mean()
 
                 optimizer.zero_grad()
                 loss.backward()

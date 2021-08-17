@@ -1,4 +1,4 @@
-from collections import deque, namedtuple
+from collections import deque
 import torch
 import torchvision.transforms as T
 
@@ -48,18 +48,26 @@ class Stacking:
 
         return torch.cat(frames, dim=1)
 
+    def remove_episode_bleed_in(self, transition_stack):
+        if len(transition_stack) > 1:
+            for i in range(len(transition_stack) - 2, -1, -1):
+                if transition_stack[i].next_state == None:
+                    transition_stack = transition_stack[i+1:]
+                    break
+
+        return transition_stack
+
     def from_memory(self, memory, batch_size=1):
         transitions = []
+        mem_indices = []
+        is_weights = []
+
         for _ in range(batch_size):
-            idx = memory.sample()
+            idx, is_weight = memory.sample()
             min_idx = max(idx - self.num_frames + 1, 0)
             transition_stack = memory[min_idx:idx + 1]
 
-            if len(transition_stack) > 1:
-                for i in range(len(transition_stack) - 2, -1, -1):
-                    if transition_stack[i].next_state == None:
-                        transition_stack = transition_stack[i+1:]
-                        break
+            transition_stack = self.remove_episode_bleed_in(transition_stack)
 
             state = [t.state for t in transition_stack]
             if transition_stack[-1].next_state == None:
@@ -67,16 +75,19 @@ class Stacking:
             else:
                 next_state = [t.next_state for t in transition_stack]
 
+            mem_indices.append(idx)
+            is_weights.append(is_weight)
             transitions.append(
                 Transition(
                     self.stack(state),
                     transition_stack[-1].action,
                     transition_stack[-1].reward,
-                    self.stack(next_state)
-                )
-            )
+                    self.stack(next_state)))
 
-        return transitions
+        is_weights = torch.tensor(is_weights, dtype=torch.float).unsqueeze(1)
+        is_weights /= is_weights.max()
+
+        return transitions, mem_indices, is_weights
 
 
 def get_prediction_and_target(batch, online_dqn, target_dqn, batch_size=1, gamma=0.99, device=None):
