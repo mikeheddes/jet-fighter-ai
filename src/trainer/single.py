@@ -28,6 +28,7 @@ MIN_MEMORY_SIZE = 10_000
 TARGET_NET_UPDATE_FREQ = 1000
 NUM_EPISODES = 15_000
 C, H, W = 3, 90, 120
+MULTI_STEP = 3
 
 
 def copy_model_state(from_model: torch.nn.Module, to_model: torch.nn.Module):
@@ -50,7 +51,7 @@ def main():
     memory = Memory(MEMORY_CAPACITY)
     toTensor = T.ToTensor()
     transform = Transform((H, W))
-    stacking = Stacking(FRAME_STACKING)
+    stacking = Stacking(FRAME_STACKING, multi_step=MULTI_STEP, gamma=GAMMA)
 
     def select_action(state, step):
         sample = random.random()
@@ -116,7 +117,8 @@ def main():
 
                 pred, target = get_prediction_and_target(
                     batch, online_dqn, target_dqn,
-                    batch_size=BATCH_SIZE, gamma=GAMMA, device=device)
+                    batch_size=BATCH_SIZE, gamma=GAMMA, 
+                    multi_step=MULTI_STEP, device=device)
 
                 errors = torch.abs(pred - target)
                 for batch_i in range(BATCH_SIZE):
@@ -179,7 +181,7 @@ def main():
 
                         mean_q_value = mean_max_q_value / (t + 1)
                         print("episode score:", str(env.game.score),
-                              f"\tmean q-value: {mean_q_value:.1f}", "\tat episode", i_episode)
+                              f"\tmean q-value: {mean_q_value:.4g}", "\tat episode", i_episode)
 
                     if i_episode % 50 == 49:
                         torch.save({

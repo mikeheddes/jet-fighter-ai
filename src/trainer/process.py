@@ -17,10 +17,13 @@ class Transform(torch.nn.Module):
 
 
 class Stacking:
-    def __init__(self, num_frames):
+    def __init__(self, num_frames, multi_step=1, gamma=0.99):
         super().__init__()
         self.buffer = deque(maxlen=num_frames)
         self.num_frames = num_frames
+        self.multi_step = multi_step
+        steps = torch.arange(0, multi_step)
+        self.discounts = torch.pow(gamma, steps).unsqueeze(1)
 
     def reset(self):
         self.buffer.clear()
@@ -52,10 +55,28 @@ class Stacking:
         if len(transition_stack) > 1:
             for i in range(len(transition_stack) - 2, -1, -1):
                 if transition_stack[i].next_state == None:
-                    transition_stack = transition_stack[i+1:]
+                    transition_stack = transition_stack[i + 1:]
                     break
 
         return transition_stack
+
+    def truncate_multi_step(self, transition_stack):
+        for i in range(len(transition_stack)):
+            if transition_stack[i].next_state == None:
+                transition_stack = transition_stack[:i + 1]
+                break
+
+        return transition_stack
+
+    def extract_rewards(self, transition_stack):
+        rewards = [t.reward for t in transition_stack]
+        
+        padding_len = self.multi_step - len(rewards)
+        if padding_len != 0:
+            zero = torch.zeros((1, 1), dtype=torch.float)
+            rewards += [zero] * padding_len
+
+        return torch.cat(rewards)
 
     def from_memory(self, memory, batch_size=1):
         transitions = []
@@ -68,23 +89,39 @@ class Stacking:
             sample_ids.append(sample_id)
             is_weights.append(is_weight)
 
+            # Create the stack of frames for the start state,
+            # the state at which the action was taken.
             idx = memory.sample_id_to_index(sample_id)
-            min_idx = max(idx - self.num_frames + 1, 0)
-            transition_stack = memory[min_idx:idx + 1]
+            start_idx = max(idx - self.num_frames + 1, 0)
+            start_stack = memory[start_idx:idx + 1]
+            # Remove steps that are from a previous episode
+            start_stack = self.remove_episode_bleed_in(start_stack)
 
-            transition_stack = self.remove_episode_bleed_in(transition_stack)
+            # Capture the N next steps
+            end_idx = idx + self.multi_step
+            multi_step_stack = memory[idx:end_idx]
+            # Remove steps that are from the next episode
+            multi_step_stack = self.truncate_multi_step(multi_step_stack)
+            rewards = self.extract_rewards(multi_step_stack)
+            rewards = rewards * self.discounts
 
-            state = [t.state for t in transition_stack]
-            if transition_stack[-1].next_state == None:
+            # Create the stack of frames for the next state,
+            # the state the agent is in after the N-steps.
+            num_frames_to_add = self.num_frames - len(multi_step_stack)
+            frame_slice = slice(-num_frames_to_add - 1, -1)
+            end_stack = start_stack[frame_slice] + multi_step_stack
+
+            state = [t.state for t in start_stack]
+            if end_stack[-1].next_state == None:
                 next_state = None
             else:
-                next_state = [t.next_state for t in transition_stack]
+                next_state = [t.next_state for t in end_stack]
 
             transitions.append(
                 Transition(
                     self.stack(state),
-                    transition_stack[-1].action,
-                    transition_stack[-1].reward,
+                    start_stack[-1].action,
+                    rewards.sum(0, keepdim=True),
                     self.stack(next_state)))
 
         is_weights = torch.tensor(is_weights, dtype=torch.float).unsqueeze(1)
@@ -93,7 +130,7 @@ class Stacking:
         return transitions, sample_ids, is_weights
 
 
-def get_prediction_and_target(batch, online_dqn, target_dqn, batch_size=1, gamma=0.99, device=None):
+def get_prediction_and_target(batch, online_dqn, target_dqn, batch_size=1, multi_step=1, gamma=0.99, device=None):
     non_final_mask = [s is not None for s in batch.next_state]
     non_final_mask = torch.tensor(
         non_final_mask, dtype=torch.bool, device=device)
@@ -114,6 +151,7 @@ def get_prediction_and_target(batch, online_dqn, target_dqn, batch_size=1, gamma
         next_state_values = torch.zeros((batch_size, 1), device=device)
         next_state_values[non_final_mask] = target_dqn(
             non_final_next_states).gather(1, non_final_next_actions)
-        expected_q_values = reward_batch + (next_state_values * gamma)
+        discount = gamma ** multi_step
+        expected_q_values = reward_batch + (next_state_values * discount)
 
     return q_values, expected_q_values
