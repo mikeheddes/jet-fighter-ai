@@ -34,31 +34,36 @@ class Memory:
         if self.write_index == 0:
             self.wrap_arounds += 1
 
-    def __getitem__(self, idx):
-        return self.data[idx]
+    def __getitem__(self, index):
+        return self.data[index]
 
     def sample(self):
         at_sum = random.random() * self.tree.sum
 
         index, priority = self.tree.get(at_sum)
-        index += self.wrap_arounds * self.capacity
+        sample_id = index + self.wrap_arounds * self.capacity
         probability = priority / self.tree.sum
         is_weight = (len(self.data) * probability) ** -self.beta
 
-        return index, is_weight
+        return sample_id, is_weight
 
     def get_priority(self, error):
         return (abs(error) + self.epsilon) ** self.alpha
 
-    def update_priority(self, index, error):
+    def update_priority(self, sample_id, error):
         items_added = self.wrap_arounds * self.capacity + self.write_index - 1
 
         # Stop if the item to update is no longer in memory
-        if index < items_added - self.capacity:
+        if sample_id < items_added - self.capacity:
             return
 
+        index = self.sample_id_to_index(sample_id)
+
         priority = self.get_priority(error)
-        self.tree.update(index % self.capacity, priority)
+        self.tree.update(index, priority)
+
+    def sample_id_to_index(self, sample_id):
+        return sample_id % self.capacity
 
 
 class SumTree:

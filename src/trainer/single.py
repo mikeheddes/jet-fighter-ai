@@ -110,7 +110,7 @@ def main():
                 if len(memory) < MIN_MEMORY_SIZE:
                     continue
 
-                transitions, mem_indices, is_weights = stacking.from_memory(
+                transitions, sample_ids, is_weights = stacking.from_memory(
                     memory, batch_size=BATCH_SIZE)
                 batch = TransitionBatch(*zip(*transitions))
 
@@ -121,7 +121,7 @@ def main():
                 errors = torch.abs(pred - target)
                 for batch_i in range(BATCH_SIZE):
                     memory.update_priority(
-                        mem_indices[batch_i], 
+                        sample_ids[batch_i],
                         errors[batch_i].item())
 
                 is_weights = is_weights.to(device)

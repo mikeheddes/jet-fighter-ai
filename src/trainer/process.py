@@ -59,11 +59,16 @@ class Stacking:
 
     def from_memory(self, memory, batch_size=1):
         transitions = []
-        mem_indices = []
+        sample_ids = []
         is_weights = []
 
         for _ in range(batch_size):
-            idx, is_weight = memory.sample()
+            sample_id, is_weight = memory.sample()
+
+            sample_ids.append(sample_id)
+            is_weights.append(is_weight)
+
+            idx = memory.sample_id_to_index(sample_id)
             min_idx = max(idx - self.num_frames + 1, 0)
             transition_stack = memory[min_idx:idx + 1]
 
@@ -75,8 +80,6 @@ class Stacking:
             else:
                 next_state = [t.next_state for t in transition_stack]
 
-            mem_indices.append(idx)
-            is_weights.append(is_weight)
             transitions.append(
                 Transition(
                     self.stack(state),
@@ -87,7 +90,7 @@ class Stacking:
         is_weights = torch.tensor(is_weights, dtype=torch.float).unsqueeze(1)
         is_weights /= is_weights.max()
 
-        return transitions, mem_indices, is_weights
+        return transitions, sample_ids, is_weights
 
 
 def get_prediction_and_target(batch, online_dqn, target_dqn, batch_size=1, gamma=0.99, device=None):
