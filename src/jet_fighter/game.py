@@ -111,9 +111,6 @@ class HeadlessRenderer:
         ]
         reward = score_change[0] - score_change[1]
         self.last_score = self.game.score
-        if abs(reward) > 1:
-            import pdb
-            pdb.set_trace()
         self.render()
         self.frame_num += 1
         done = self.frame_num >= self.maxlen

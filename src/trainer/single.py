@@ -4,6 +4,7 @@ from itertools import count
 import gc
 import os
 import psutil
+import time
 
 import torch
 import torch.optim as optim
@@ -50,7 +51,7 @@ def main():
     loss_fn = torch.nn.MSELoss(reduction='none')
     memory = Memory(MEMORY_CAPACITY)
     toTensor = T.ToTensor()
-    transform = Transform((H, W))
+    transform = Transform()
     stacking = Stacking(FRAME_STACKING, multi_step=MULTI_STEP, gamma=GAMMA)
 
     def select_action(state, step):
@@ -78,7 +79,8 @@ def main():
         stacking.reset()
 
         raw_obs = toTensor(raw_obs).to(device)
-        transformed_obs = transform(raw_obs).unsqueeze(0)
+        raw_obs = raw_obs.unsqueeze(0)
+        transformed_obs = transform(raw_obs)
         stacked_obs = stacking(transformed_obs)
 
         for step in count(step):
@@ -96,7 +98,8 @@ def main():
                     next_stacked_obs = None
                 else:
                     next_raw_obs = toTensor(next_raw_obs).to(device)
-                    next_transformed_obs = transform(next_raw_obs).unsqueeze(0)
+                    next_raw_obs = next_raw_obs.unsqueeze(0)
+                    next_transformed_obs = transform(next_raw_obs)
                     next_stacked_obs = stacking(next_transformed_obs)
 
                 transition = Transition(

@@ -1,13 +1,9 @@
-import torch
 import torch.nn as nn
-import torch.optim as optim
 import torch.nn.functional as F
-import torchvision.transforms as T
 
 
 def get_conv_output_size(size_in, kernel_size, padding=0, stride=1, dilation=1):
     return (size_in + 2 * padding - dilation * (kernel_size - 1) - 1) // stride + 1
-
 
 
 class DQN(nn.Module):
@@ -24,6 +20,7 @@ class DQN(nn.Module):
             in_channels=16, out_channels=32, kernel_size=4, stride=2, padding=1)
         H = get_conv_output_size(H, 4, stride=2, padding=1)
         W = get_conv_output_size(W, 4, stride=2, padding=1)
+        self.num_conv2_features = 32 * H * W
 
         self.fc1 = nn.Linear(32 * H * W, 512)
 
@@ -38,7 +35,7 @@ class DQN(nn.Module):
     def forward(self, x):
         out = F.relu(self.conv1(x))
         out = F.relu(self.conv2(out))
-        out = out.reshape(out.size(0), -1)
+        out = out.view(-1, self.num_conv2_features)
         out = F.relu(self.fc1(out))
 
         value = F.relu(self.vl1(out))

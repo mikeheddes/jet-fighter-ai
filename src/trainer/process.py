@@ -1,19 +1,19 @@
 from collections import deque
 import torch
-import torchvision.transforms as T
+import torch.nn as nn
+import torch.nn.functional as F
 
 from trainer.types import Transition
 
 
-class Transform(torch.nn.Module):
-    def __init__(self, frame_size):
+class Transform(nn.Module):
+    def __init__(self):
         super().__init__()
-        self.transform = torch.nn.Sequential(
-            # T.Grayscale(),
-            T.Resize(frame_size))
+        self.pooling = torch.nn.AvgPool2d(2, stride=2)
 
     def forward(self, x):
-        return self.transform(x)
+        out = self.pooling(x)
+        return out
 
 
 class Stacking:
@@ -70,7 +70,7 @@ class Stacking:
 
     def extract_rewards(self, transition_stack):
         rewards = [t.reward for t in transition_stack]
-        
+
         padding_len = self.multi_step - len(rewards)
         if padding_len != 0:
             zero = torch.zeros((1, 1), dtype=torch.float)
