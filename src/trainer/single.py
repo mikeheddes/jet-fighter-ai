@@ -17,18 +17,18 @@ from trainer.process import Transform, Stacking, get_prediction_and_target
 from trainer.types import Transition, TransitionBatch
 
 BATCH_SIZE = 64
-GAMMA = 0.99
+GAMMA = 0.997
 EPS_START = 1.0
 EPS_END = 0.05
 EPS_DECAY_STEPS = 5_000_000
 LEARNING_RATE = 0.00025
 FRAME_STACKING = 4
 NUM_ACTIONS = 4
-MEMORY_CAPACITY = 100_000
+MEMORY_CAPACITY = 500_000
 MIN_MEMORY_SIZE = 10_000
 TARGET_NET_UPDATE_FREQ = 1000
 NUM_EPISODES = 15_000
-C, H, W = 3, 90, 120
+C, H, W = 1, 90, 120
 MULTI_STEP = 3
 
 
@@ -186,7 +186,7 @@ def main():
                         print("episode score:", str(env.game.score),
                               f"\tmean q-value: {mean_q_value:.4g}", "\tat episode", i_episode)
 
-                    if i_episode % 50 == 49:
+                    if i_episode % 20 == 19:
                         torch.save({
                             'steps': step,
                             'model_state_dict': online_dqn.state_dict(),

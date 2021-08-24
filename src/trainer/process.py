@@ -1,7 +1,7 @@
 from collections import deque
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+import torchvision.transforms as T
 
 from trainer.types import Transition
 
@@ -9,10 +9,12 @@ from trainer.types import Transition
 class Transform(nn.Module):
     def __init__(self):
         super().__init__()
+        self.gray = T.Grayscale()
         self.pooling = torch.nn.AvgPool2d(2, stride=2)
 
     def forward(self, x):
-        out = self.pooling(x)
+        out = self.gray(x)
+        out = self.pooling(out)
         return out
 
 
