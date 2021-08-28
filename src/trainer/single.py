@@ -86,7 +86,7 @@ def main():
         # raw_obs = raw_obs.unsqueeze(0)
         # transformed_obs = transform(raw_obs)
         transformed_obs = torch.tensor(
-            raw_obs, dtype=torch.float).view(1, 1, 1, 4)
+            raw_obs, dtype=torch.float).view(1, 1, 1, 4).to(device)
         stacked_obs = stacking(transformed_obs)
 
         for step in count(step):
@@ -107,7 +107,7 @@ def main():
                     # next_raw_obs = next_raw_obs.unsqueeze(0)
                     # next_transformed_obs = transform(next_raw_obs)
                     next_transformed_obs = torch.tensor(
-                        next_raw_obs, dtype=torch.float).view(1, 1, 1, 4)
+                        next_raw_obs, dtype=torch.float).view(1, 1, 1, 4).to(device)
                     next_stacked_obs = stacking(next_transformed_obs)
 
                 transition = Transition(
@@ -159,7 +159,7 @@ def main():
                         # raw_obs = raw_obs.unsqueeze(0)
                         # transformed_obs = transform(raw_obs)
                         transformed_obs = torch.tensor(
-                            raw_obs, dtype=torch.float).view(1, 1, 1, 4)
+                            raw_obs, dtype=torch.float).view(1, 1, 1, 4).to(device)
                         stacked_obs = stacking(transformed_obs)
 
                         mean_max_q_value = 0
@@ -182,7 +182,7 @@ def main():
                                 # next_raw_obs = next_raw_obs.unsqueeze(0)
                                 # next_transformed_obs = transform(next_raw_obs)
                                 next_transformed_obs = torch.tensor(
-                                    next_raw_obs, dtype=torch.float).view(1, 1, 1, 4)
+                                    next_raw_obs, dtype=torch.float).view(1, 1, 1, 4).to(device)
                                 next_stacked_obs = stacking(
                                     next_transformed_obs)
 
