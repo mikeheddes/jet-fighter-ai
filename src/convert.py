@@ -1,22 +1,21 @@
 import torch
+import torch.nn as nn
 
 from trainer.model import DQN
 from trainer.single import C, H, W, FRAME_STACKING, NUM_ACTIONS
+from trainer.process import Transform
 
-import torch.nn as nn
-import torch.nn.functional as F
 
 
 class ModelWithPreprocessing(nn.Module):
     def __init__(self, frame_shape, num_actions):
-        super(ModelWithPreprocessing, self).__init__()
-        self.scaling_weights = torch.full(
-            (12, 12, 2, 2), 0.25, dtype=torch.float)
+        super().__init__()
+        self.transform = Transform(channels=C)
         self.model = DQN(frame_shape, num_actions)
 
     def forward(self, *img_data):
-        frames = torch.cat(img_data, dim=1)
-        x = F.conv2d(frames, weight=self.scaling_weights, stride=2)
+        img_data = [self.transform(im) for im in img_data]
+        x = torch.cat(img_data, dim=1)
         x /= 255.0
         out = self.model(x)
         return out
@@ -24,7 +23,7 @@ class ModelWithPreprocessing(nn.Module):
 
 def main():
     model = ModelWithPreprocessing((FRAME_STACKING * C, H, W), NUM_ACTIONS)
-    state_dict = torch.load("../model.pt", map_location="cpu")
+    state_dict = torch.load("../model-4.pt", map_location="cpu")
     model.model.load_state_dict(state_dict["model_state_dict"])
 
     input_names = ('frame_data_0', 'frame_data_1',

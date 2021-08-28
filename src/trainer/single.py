@@ -26,7 +26,7 @@ FRAME_STACKING = 4
 NUM_ACTIONS = 4
 MEMORY_CAPACITY = 500_000
 MIN_MEMORY_SIZE = 10_000
-TARGET_NET_UPDATE_FREQ = 1000
+TARGET_NET_UPDATE_FREQ = 10_000
 NUM_EPISODES = 15_000
 C, H, W = 1, 90, 120
 MULTI_STEP = 3
@@ -51,7 +51,7 @@ def main():
     loss_fn = torch.nn.MSELoss(reduction='none')
     memory = Memory(MEMORY_CAPACITY)
     toTensor = T.ToTensor()
-    transform = Transform()
+    transform = Transform(C)
     stacking = Stacking(FRAME_STACKING, multi_step=MULTI_STEP, gamma=GAMMA)
 
     def select_action(state, step):

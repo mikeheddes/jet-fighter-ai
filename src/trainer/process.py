@@ -1,20 +1,43 @@
-from collections import deque
 import torch
 import torch.nn as nn
-import torchvision.transforms as T
+import torch.nn.functional as F
+from collections import deque
 
 from trainer.types import Transition
 
 
-class Transform(nn.Module):
+class Grayscale(nn.Module):
     def __init__(self):
         super().__init__()
-        self.gray = T.Grayscale()
-        self.pooling = torch.nn.AvgPool2d(2, stride=2)
+        self.weights = torch.tensor(
+            [[[[0.2989]], [[0.587]], [[0.114]]]],
+            dtype=torch.float)
+
+    def forward(self, x):
+        return (x * self.weights).sum(1, keepdims=True)
+
+
+class Downscale(nn.Module):
+    def __init__(self, channels):
+        super().__init__()
+        self.weights = torch.full(
+            (channels, channels, 2, 2),
+            0.25,
+            dtype=torch.float)
+
+    def forward(self, x):
+        return F.conv2d(x, weight=self.weights, stride=2)
+
+
+class Transform(nn.Module):
+    def __init__(self, channels):
+        super().__init__()
+        self.gray = Grayscale()
+        self.downscaling = Downscale(channels)
 
     def forward(self, x):
         out = self.gray(x)
-        out = self.pooling(out)
+        out = self.downscaling(out)
         return out
 
 

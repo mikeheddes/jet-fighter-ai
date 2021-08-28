@@ -33,7 +33,7 @@ class JetFighter:
     def resetPlane(self, color):
         x = random.random() * self.frameSize.width
         y = random.random() * self.frameSize.height
-        angle = random.random() * math.pi * 2
+        angle = random.random() * math.pi * 2.0
         return Plane(x, y, angle, self.frameSize, color)
 
     def reset(self):
@@ -68,6 +68,7 @@ class JetFighter:
 class HeadlessRenderer:
     n_actions = 4
     state_size = (3, HEIGHT, WIDTH)
+    samples = 8
 
     def __init__(self, maxlen=1500):
         if sys.platform.startswith('linux'):
@@ -77,7 +78,8 @@ class HeadlessRenderer:
 
         self.ctx.enable(moderngl.PROGRAM_POINT_SIZE)
 
-        self.fbo = self.ctx.simple_framebuffer((WIDTH, HEIGHT), samples=8)
+        self.fbo = self.ctx.simple_framebuffer(
+            (WIDTH, HEIGHT), samples=self.samples)
         self.fbo.use()
 
         self.fbo_out = self.ctx.simple_framebuffer((WIDTH, HEIGHT), samples=0)
@@ -103,7 +105,7 @@ class HeadlessRenderer:
         return self.read_image()
 
     def step(self, action):
-        self.game.step([action, random.randint(0, 4)])
+        self.game.step([action, random.randint(0, 3)])
 
         score_change = [
             self.game.score[0] - self.last_score[0],
@@ -130,12 +132,22 @@ class App(moderngl_window.WindowConfig):
 
         self.game = JetFighter(WIDTH, HEIGHT)
         self.game.reset()
+        self.last_score = self.game.score
         # self.frame_num = 0
 
     def render(self, time, frame_time):
-        self.game.step([random.randint(0, 4), random.randint(0, 4)])
+        self.game.step([random.randint(0, 3), random.randint(0, 3)])
+        score_change = [
+            self.game.score[0] - self.last_score[0],
+            self.game.score[1] - self.last_score[1],
+        ]
+        reward = score_change[0] - score_change[1]
+        if reward != 0:
+            print(reward)
+            print(self.game.score)
+        self.last_score = self.game.score
         self.game.draw(self.ctx)
-        self.frame_num += 1
+        # self.frame_num += 1
 
         # if self.frame_num == 240:
         #     image = Image.frombuffer("RGB", self.ctx.fbo.size, self.ctx.fbo.read())
