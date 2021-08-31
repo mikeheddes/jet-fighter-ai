@@ -281,9 +281,9 @@ memory = PrioritizedMemory(MEMORY_SIZE)
 class Grayscale(nn.Module):
     def __init__(self):
         super().__init__()
-        self.weights = torch.tensor(
+        self.weights = nn.Parameter(torch.tensor(
             [[[[0.2989]], [[0.587]], [[0.114]]]],
-            dtype=torch.float)
+            dtype=torch.float), requires_grad=False)
 
     def forward(self, x):
         return (x * self.weights).sum(1, keepdims=True)
@@ -292,10 +292,9 @@ class Grayscale(nn.Module):
 class Downscale(nn.Module):
     def __init__(self, channels):
         super().__init__()
-        self.weights = torch.full(
-            (channels, channels, 2, 2),
-            0.25,
-            dtype=torch.float)
+        self.weights = nn.Parameter(torch.full(
+            (channels, channels, 2, 2), 0.25,
+            dtype=torch.float), requires_grad=False)
 
     def forward(self, x):
         return F.conv2d(x, weight=self.weights, stride=2)
@@ -529,13 +528,15 @@ for i_episode in count():
         episode_frames = torch.stack(episode_frames, dim=1)
         writer.add_scalar("rollout/episode_sum_rewards",
                           episode_sum_rewards, step)
-        writer.add_scalar("rollout/episode_mean_value", episode_mean_value, step)
+        writer.add_scalar("rollout/episode_mean_value",
+                          episode_mean_value, step)
         writer.add_video("rollout/episode", episode_frames, step, fps=30)
         print("episode summed reward", episode_sum_rewards,
               f"\tmean value: {episode_mean_value:.1f}", "\tat episode", i_episode, f"\tat {(time.time() - start_time):.1f}s")
 
         writer.add_scalar("memory/length", len(memory), step)
-        writer.add_histogram("memory/priorities", memory.get_all_priorities(), step)
+        writer.add_histogram("memory/priorities",
+                             memory.get_all_priorities(), step)
 
     if i_episode % 50 == 49:
         torch.save({
