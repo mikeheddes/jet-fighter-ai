@@ -418,7 +418,7 @@ class Actor:
             self.model = model
 
         self.toTensor = T.ToTensor()
-        self.transform = Transform(C)
+        self.transform = Transform(C).to(device=device)
 
     def policy(self, state):
         global step
@@ -488,8 +488,8 @@ cpu_mem = process.memory_info().rss / 1e6
 print(f"Start script, using {gpu_mem:.2f} MB GPU and {cpu_mem:.2f} MB CPU")
 
 learner = Learner(device=device)
-actor = Actor(model=learner.online_dqn)
-rollout = Rollout(model=learner.online_dqn)
+actor = Actor(model=learner.online_dqn, device=device)
+rollout = Rollout(model=learner.online_dqn, device=device)
 
 state = actor.env.reset()
 state = actor.toTensor(state).to(device)
