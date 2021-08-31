@@ -443,7 +443,7 @@ class Actor:
             if done:
                 next_state = None
             else:
-                next_state = self.toTensor(next_state)
+                next_state = self.toTensor(next_state).to(self.device)
                 next_state = next_state.unsqueeze(0)
                 next_state = self.transform(next_state)
 
