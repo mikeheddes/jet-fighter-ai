@@ -3,7 +3,6 @@ import psutil
 import random
 from collections import namedtuple
 from itertools import count
-import gym
 import time
 import datetime
 
