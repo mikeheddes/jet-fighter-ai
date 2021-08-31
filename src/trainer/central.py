@@ -492,7 +492,7 @@ actor = Actor(model=learner.online_dqn)
 rollout = Rollout(model=learner.online_dqn)
 
 state = actor.env.reset()
-state = actor.toTensor(state)
+state = actor.toTensor(state).to(device)
 state = state.unsqueeze(0)
 state = actor.transform(state)
 writer.add_graph(learner.online_dqn, state)
