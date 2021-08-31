@@ -11,7 +11,10 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
+import torchvision.transforms as T
 from torch.utils.tensorboard import SummaryWriter
+
+from trainer.env import Environment
 
 
 # if gpu is to be used
@@ -186,24 +189,40 @@ class PrioritizedMemory:
         return torch.tensor(priorities, dtype=torch.float)
 
 
+def get_conv_output_size(size_in, kernel_size, padding=0, stride=1, dilation=1):
+    return (size_in + 2 * padding - dilation * (kernel_size - 1) - 1) // stride + 1
+
 
 class DQN(nn.Module):
-    def __init__(self, state_size, num_actions):
-        super(DQN, self).__init__()
-        state_size = torch.tensor(state_size, dtype=torch.int64)
-        self.input_features = torch.prod(state_size)
-        self.fc1 = nn.Linear(self.input_features, 24)
+    def __init__(self, frame_shape, num_actions):
+        super().__init__()
+        C, H, W = frame_shape
+
+        self.conv1 = nn.Conv2d(
+            in_channels=C, out_channels=16, kernel_size=8, stride=4, padding=2)
+        H = get_conv_output_size(H, 8, stride=4, padding=2)
+        W = get_conv_output_size(W, 8, stride=4, padding=2)
+
+        self.conv2 = nn.Conv2d(
+            in_channels=16, out_channels=32, kernel_size=4, stride=2, padding=1)
+        H = get_conv_output_size(H, 4, stride=2, padding=1)
+        W = get_conv_output_size(W, 4, stride=2, padding=1)
+        self.num_conv2_features = 32 * H * W
+
+        self.fc1 = nn.Linear(self.num_conv2_features, 512)
 
         # Value layers
-        self.vl1 = nn.Linear(24, 12)
-        self.vl2 = nn.Linear(12, 1)
+        self.vl1 = nn.Linear(512, 128)
+        self.vl2 = nn.Linear(128, 1)
 
         # Action advantage layers
-        self.al1 = nn.Linear(24, 12)
-        self.al2 = nn.Linear(12, num_actions)
+        self.al1 = nn.Linear(512, 128)
+        self.al2 = nn.Linear(128, num_actions)
 
     def forward(self, x):
-        out = x.view(-1, self.input_features)
+        out = F.relu(self.conv1(x))
+        out = F.relu(self.conv2(out))
+        out = out.view(-1, self.num_conv2_features)
         out = F.relu(self.fc1(out))
 
         value = F.relu(self.vl1(out))
@@ -211,23 +230,23 @@ class DQN(nn.Module):
 
         advantage = F.relu(self.al1(out))
         advantage = self.al2(advantage)
-
         mean_advantage = advantage.mean(1, keepdims=True)
         return value + advantage - mean_advantage
 
 
 BATCH_SIZE = 128
-GAMMA = 0.99
+STACKING = 1
+GAMMA = 0.997
 EPS_START = 1.0
 EPS_END = 0.05
-EPS_DECAY = 200
-LEARNING_RATE = 0.001
-C, H, W = 1, 1, 4
-NUM_ACTIONS = 2
-STACKING = 1
-MEMORY_SIZE = 10_000
-TARGET_NET_UPDATE_FREQ = 100
-NUM_STEPS = 150_000
+EPS_DECAY = 5_000_000
+LEARNING_RATE = 0.00025
+NUM_ACTIONS = 4
+MEMORY_SIZE = 500_000
+MIN_MEMORY_SIZE = 10_000
+TARGET_NET_UPDATE_FREQ = 10_000
+NUM_STEPS = 500_000_000
+C, H, W = 1, 90, 120
 
 os.makedirs("../checkpoints/", exist_ok=True)
 os.makedirs("../runs/", exist_ok=True)
@@ -237,7 +256,7 @@ timezone = datetime.timezone.utc
 current_date = datetime.datetime.now(timezone)
 version = current_date.strftime("d%Y_%m_%d-t%H_%M_%S")
 
-writer = SummaryWriter(f'../runs/dqn_cartpole/{version}/')
+writer = SummaryWriter(f'../runs/jet-fighter/{version}/')
 
 # writer.add_hparams({
 #     "batch_size": BATCH_SIZE,
@@ -260,10 +279,45 @@ writer = SummaryWriter(f'../runs/dqn_cartpole/{version}/')
 memory = PrioritizedMemory(MEMORY_SIZE)
 
 
+class Grayscale(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.weights = torch.tensor(
+            [[[[0.2989]], [[0.587]], [[0.114]]]],
+            dtype=torch.float)
+
+    def forward(self, x):
+        return (x * self.weights).sum(1, keepdims=True)
+
+
+class Downscale(nn.Module):
+    def __init__(self, channels):
+        super().__init__()
+        self.weights = torch.full(
+            (channels, channels, 2, 2),
+            0.25,
+            dtype=torch.float)
+
+    def forward(self, x):
+        return F.conv2d(x, weight=self.weights, stride=2)
+
+
+class Transform(nn.Module):
+    def __init__(self, channels):
+        super().__init__()
+        self.gray = Grayscale()
+        self.downscaling = Downscale(channels)
+
+    def forward(self, x):
+        out = self.gray(x)
+        out = self.downscaling(out)
+        return out
+
+
 class Learner:
     def __init__(self, device=None):
-        self.online_dqn = DQN((1, C * STACKING, H, W), NUM_ACTIONS).to(device)
-        self.target_dqn = DQN((1, C * STACKING, H, W), NUM_ACTIONS).to(device)
+        self.online_dqn = DQN((C * STACKING, H, W), NUM_ACTIONS).to(device)
+        self.target_dqn = DQN((C * STACKING, H, W), NUM_ACTIONS).to(device)
         self.update_target_model()
 
         self.optimizer = optim.RMSprop(
@@ -275,7 +329,7 @@ class Learner:
         self.target_dqn.load_state_dict(state_dict)
 
     def step(self):
-        if len(memory) < 1000:
+        if len(memory) < MIN_MEMORY_SIZE:
             return
 
         global step
@@ -352,7 +406,7 @@ Transition = namedtuple(
 class Actor:
     def __init__(self, model=None, device=None):
         self.device = device
-        self.env = gym.make('CartPole-v1')
+        self.env = Environment()
 
         if model is None:
             self.model = DQN(
@@ -360,6 +414,9 @@ class Actor:
                 NUM_ACTIONS).to(device)
         else:
             self.model = model
+
+        self.toTensor = T.ToTensor()
+        self.transform = Transform(C)
 
     def policy(self, state):
         global step
@@ -374,19 +431,20 @@ class Actor:
 
     def episode(self):
         state = self.env.reset()
-        state = torch.tensor(state, dtype=torch.float)
-        state = state.view(1, C, H, W).to(self.device)
+        state = self.toTensor(state).to(self.device)
+        state = state.unsqueeze(0)
+        state = self.transform(state)
 
         while True:
             action = self.policy(state)
-            next_state, reward, done, _ = self.env.step(action)
+            next_state, reward, done = self.env.step(action)
 
             if done:
                 next_state = None
             else:
-                next_state = torch.tensor(next_state, dtype=torch.float)
-                next_state = next_state.view(
-                    1, C, H, W).to(self.device)
+                next_state = self.toTensor(next_state)
+                next_state = next_state.unsqueeze(0)
+                next_state = self.transform(next_state)
 
             yield Transition(
                 state.to("cpu"),
@@ -432,8 +490,9 @@ actor = Actor(model=learner.online_dqn)
 rollout = Rollout(model=learner.online_dqn)
 
 state = actor.env.reset()
-state = torch.tensor(state, dtype=torch.float)
-state = state.view(1, C, H, W)
+state = actor.toTensor(state)
+state = state.unsqueeze(0)
+state = actor.transform(state)
 writer.add_graph(learner.online_dqn, state)
 
 step = 0
@@ -442,7 +501,7 @@ for i_episode in count():
     if step >= NUM_STEPS:
         break
 
-    if i_episode % 20 == 19:
+    if i_episode % 10 == 9:
         gpu_mem = torch.cuda.memory_allocated(device) / 1e6
         process = psutil.Process(os.getpid())
         cpu_mem = process.memory_info().rss / 1e6
@@ -458,18 +517,19 @@ for i_episode in count():
 
     if i_episode % 5 == 4:
         episode_frames = []
+        episode_sum_rewards = 0.0
         for transition in rollout.episode():
             episode_frames.append(transition.state)
+            episode_sum_rewards += transition.reward
             memory.add(transition)
 
-        episode_duration = rollout.frames
         episode_mean_value = rollout.mean_value
         episode_frames = torch.stack(episode_frames, dim=1)
-        writer.add_scalar("rollout/episode_duration", episode_duration, step)
-        writer.add_scalar("rollout/episode_mean_value",
-                          episode_mean_value, step)
-        writer.add_video("rollout/episode", episode_frames, step, fps=4)
-        print("episode duration", episode_duration,
+        writer.add_scalar("rollout/episode_sum_rewards",
+                          episode_sum_rewards, step)
+        writer.add_scalar("rollout/episode_mean_value", episode_mean_value, step)
+        writer.add_video("rollout/episode", episode_frames, step, fps=30)
+        print("episode summed reward", episode_sum_rewards,
               f"\tmean value: {episode_mean_value:.1f}", "\tat episode", i_episode, f"\tat {(time.time() - start_time):.1f}s")
 
         writer.add_scalar("memory/length", len(memory), step)
