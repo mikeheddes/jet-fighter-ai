@@ -18,7 +18,7 @@ from trainer.env import Environment
 
 # if gpu is to be used
 device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
-device
+print("Using device", device)
 
 
 class Memory:
@@ -315,6 +315,7 @@ class Transform(nn.Module):
 
 class Learner:
     def __init__(self, device=None):
+        self.device = device
         self.online_dqn = DQN((C * STACKING, H, W), NUM_ACTIONS).to(device)
         self.target_dqn = DQN((C * STACKING, H, W), NUM_ACTIONS).to(device)
         self.update_target_model()
@@ -343,16 +344,17 @@ class Learner:
         non_final_mask = [s is not None for s in batch.next_state]
         non_final_mask = torch.tensor(
             non_final_mask,
-            device=device,
+            device=self.device,
             dtype=torch.bool)
         non_final_next_states = [s for s in batch.next_state if s is not None]
-        non_final_next_states = torch.cat(non_final_next_states).to(device)
-        state_batch = torch.cat(batch.state).to(device)
+        non_final_next_states = torch.cat(
+            non_final_next_states).to(self.device)
+        state_batch = torch.cat(batch.state).to(self.device)
         action_batch = torch.tensor(
-            batch.action, device=device, dtype=torch.int64)
+            batch.action, device=self.device, dtype=torch.int64)
         action_batch = action_batch.view(BATCH_SIZE, 1)
         reward_batch = torch.tensor(
-            batch.reward, device=device, dtype=torch.float)
+            batch.reward, device=self.device, dtype=torch.float)
         reward_batch = reward_batch.view(BATCH_SIZE, 1)
 
         # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
@@ -364,7 +366,8 @@ class Learner:
         with torch.no_grad():
             non_final_next_actions = self.online_dqn(
                 non_final_next_states).argmax(1, keepdims=True)
-            next_state_values = torch.zeros((BATCH_SIZE, 1), device=device)
+            next_state_values = torch.zeros(
+                (BATCH_SIZE, 1), device=self.device)
             next_state_values[non_final_mask] = self.target_dqn(
                 non_final_next_states).gather(1, non_final_next_actions)
             expected_q_values = reward_batch + (next_state_values * GAMMA)
@@ -446,10 +449,10 @@ class Actor:
                 next_state = self.transform(next_state)
 
             yield Transition(
-                state.to("cpu"),
+                state.cpu(),
                 action,
                 reward,
-                next_state.to("cpu") if next_state is not None else next_state)
+                next_state.cpu() if next_state is not None else next_state)
 
             if done:
                 return
@@ -484,7 +487,7 @@ process = psutil.Process(os.getpid())
 cpu_mem = process.memory_info().rss / 1e6
 print(f"Start script, using {gpu_mem:.2f} MB GPU and {cpu_mem:.2f} MB CPU")
 
-learner = Learner()
+learner = Learner(device=device)
 actor = Actor(model=learner.online_dqn)
 rollout = Rollout(model=learner.online_dqn)
 
