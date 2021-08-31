@@ -25,4 +25,10 @@ class Memory:
         return self.data[idx]
 
     def sample(self):
-        return random.randint(0, len(self.data) - 1)
+        return random.randint(0, len(self.data) - 1), 1.0
+
+    def update_priority(self, *args, **kwargs):
+        pass
+
+    def sample_id_to_index(self, sample_id):
+        return sample_id

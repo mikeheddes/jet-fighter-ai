@@ -39,11 +39,12 @@ class DQN(nn.Module):
         out = x.view(-1, self.num_conv2_features)
         out = F.relu(self.fc1(out))
 
-        value = F.relu(self.vl1(out))
-        value = self.vl2(value)
+        # value = F.relu(self.vl1(out))
+        # value = self.vl2(value)
 
         advantage = F.relu(self.al1(out))
         advantage = self.al2(advantage)
-        mean_advantage = advantage.mean(1, keepdims=True)
+        # mean_advantage = advantage.mean(1, keepdims=True)
 
-        return value + advantage - mean_advantage
+        # return value + advantage - mean_advantage
+        return advantage

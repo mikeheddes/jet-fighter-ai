@@ -482,10 +482,15 @@ class Rollout(Actor):
         return self.total_value / self.frames
 
 
+step = 0
+
 gpu_mem = torch.cuda.memory_allocated(device) / 1e6
 process = psutil.Process(os.getpid())
 cpu_mem = process.memory_info().rss / 1e6
 print(f"Start script, using {gpu_mem:.2f} MB GPU and {cpu_mem:.2f} MB CPU")
+writer.add_scalar("host/gpu_memory_usage", gpu_mem, step)
+writer.add_scalar("host/cpu_memory_usage", cpu_mem, step)
+writer.add_scalar("actor/num_episodes", 0, step)
 
 learner = Learner(device=device)
 actor = Actor(model=learner.online_dqn, device=device)
@@ -497,7 +502,6 @@ state = state.unsqueeze(0)
 state = actor.transform(state)
 writer.add_graph(learner.online_dqn, state)
 
-step = 0
 start_time = time.time()
 for i_episode in count():
     if step >= NUM_STEPS:
