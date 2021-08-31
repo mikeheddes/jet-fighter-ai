@@ -375,6 +375,7 @@ class Learner:
         for batch_i in range(BATCH_SIZE):
             memory.update_priority(sample_ids[batch_i], errors[batch_i].item())
 
+        is_weights = is_weights.to(self.device)
         losses = self.loss_fn(q_values, expected_q_values) * is_weights
         loss = losses.mean()
 
