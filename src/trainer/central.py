@@ -21,6 +21,53 @@ device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
 print("Using device", device)
 
 
+def stack(frames, minlen=1):
+    padding = []
+    for _ in range(max(0, minlen - len(frames))):
+        padding.append(torch.zeros(
+            size=frames[0].shape,
+            dtype=frames[0].dtype,
+            device=frames[0].device))
+
+    frames = padding + frames
+    return torch.cat(frames, dim=1)
+
+
+def get_state_from_transitions(transitions):
+    start_idx = 0
+    for i in range(len(transitions) - 2, -1, -1):
+        if transitions.next_state is None:
+            start_idx = i + 1
+
+    state = [t.state for t in transitions[start_idx:]]
+    return stack(state, STACKING)
+
+
+def get_next_state_from_transitions(transitions):
+    if transitions[-1].next_state is None:
+        return None
+
+    start_idx = 0
+    for i in range(len(transitions) - 2, -1, -1):
+        if transitions.next_state is None:
+            start_idx = i + 1
+
+    next_state = [t.next_state for t in transitions[start_idx:]]
+    return stack(next_state, STACKING)
+
+
+def transition_from_memory(memory, index):
+    start_idx = max(0, index - STACKING + 1)
+    end_idx = index + 1
+
+    transition_stack = memory.data[start_idx:end_idx]
+    return Transition(
+        state=get_state_from_transitions(transition_stack),
+        action=transition_stack[-1].action,
+        reward=transition_stack[-1].reward,
+        next_state=get_next_state_from_transitions(transition_stack))
+
+
 class Memory:
     def __init__(self, capacity):
         self.capacity = capacity
@@ -114,7 +161,8 @@ class SumTree:
 
 
 class PrioritizedMemory:
-    def __init__(self, capacity, alpha=0.6, beta=0.4, epsilon=0.001):
+    def __init__(self, capacity, alpha=0.6, beta=0.4, epsilon=0.001, transform=None):
+        self.transform = transform
         self.alpha = alpha
         self.beta = beta
         self.epsilon = epsilon
@@ -155,7 +203,12 @@ class PrioritizedMemory:
             at_sum = random.random() * self.tree.sum
 
             index, priority = self.tree.get(at_sum)
-            transitions[i] = self.data[index]
+            
+            if self.transform:
+                transitions[i] = self.transform(self, index)
+            else:
+                transitions[i] = self.data[index]
+
             sample_ids[i] = index + self.wrap_arounds * self.capacity
             probability = priority / self.tree.sum
             is_weights[i] = (len(self.data) * probability) ** -self.beta
@@ -234,7 +287,7 @@ class DQN(nn.Module):
 
 
 BATCH_SIZE = 128
-STACKING = 1
+STACKING = 4
 GAMMA = 0.997
 EPS_START = 1.0
 EPS_END = 0.05
