@@ -1,7 +1,7 @@
 import os
 import psutil
 import random
-from collections import namedtuple
+from collections import namedtuple, deque
 from itertools import count
 import time
 import datetime
@@ -36,7 +36,7 @@ def stack(frames, minlen=1):
 def get_state_from_transitions(transitions):
     start_idx = 0
     for i in range(len(transitions) - 2, -1, -1):
-        if transitions.next_state is None:
+        if transitions[i].next_state is None:
             start_idx = i + 1
 
     state = [t.state for t in transitions[start_idx:]]
@@ -49,7 +49,7 @@ def get_next_state_from_transitions(transitions):
 
     start_idx = 0
     for i in range(len(transitions) - 2, -1, -1):
-        if transitions.next_state is None:
+        if transitions[i].next_state is None:
             start_idx = i + 1
 
     next_state = [t.next_state for t in transitions[start_idx:]]
@@ -328,7 +328,7 @@ writer = SummaryWriter(f'../runs/jet-fighter/{version}/')
 # }, {}, run_name="/")
 
 
-memory = PrioritizedMemory(MEMORY_SIZE)
+memory = PrioritizedMemory(MEMORY_SIZE, transform=transition_from_memory)
 
 
 class Grayscale(nn.Module):
@@ -363,6 +363,20 @@ class Transform(nn.Module):
         out = self.gray(x)
         out = self.downscaling(out)
         return out
+
+
+class StackingBuffer:
+    def __init__(self, num_frames):
+        super().__init__()
+        self.num_frames = num_frames
+        self.buffer = deque(maxlen=num_frames)
+
+    def reset(self):
+        self.buffer.clear()
+
+    def __call__(self, frame):
+        self.buffer.append(frame)
+        return stack(list(self.buffer), self.num_frames)
 
 
 class Learner:
@@ -472,6 +486,7 @@ class Actor:
 
         self.toTensor = T.ToTensor()
         self.transform = Transform(C).to(device=device)
+        self.stacking = StackingBuffer(STACKING)
 
     def policy(self, state):
         global step
@@ -485,10 +500,13 @@ class Actor:
             return random.randint(0, NUM_ACTIONS - 1)
 
     def episode(self):
+        self.stacking.reset()
         state = self.env.reset()
         state = self.toTensor(state).to(self.device)
         state = state.unsqueeze(0)
         state = self.transform(state)
+        frame = state
+        state = self.stacking(state)
 
         while True:
             action = self.policy(state)
@@ -496,21 +514,25 @@ class Actor:
 
             if done:
                 next_state = None
+                next_frame = None
             else:
                 next_state = self.toTensor(next_state).to(self.device)
                 next_state = next_state.unsqueeze(0)
                 next_state = self.transform(next_state)
+                next_frame = next_state
+                next_state = self.stacking(next_state)
 
             yield Transition(
-                state.cpu(),
+                frame.cpu(),
                 action,
                 reward,
-                next_state.cpu() if next_state is not None else next_state)
+                next_frame.cpu() if next_frame is not None else next_frame)
 
             if done:
                 return
 
             state = next_state
+            frame = next_frame
 
     def update_model(self, state_dict):
         self.model.load_state_dict(state_dict)
@@ -549,10 +571,12 @@ learner = Learner(device=device)
 actor = Actor(model=learner.online_dqn, device=device)
 rollout = Rollout(model=learner.online_dqn, device=device)
 
+actor.stacking.reset()
 state = actor.env.reset()
 state = actor.toTensor(state).to(device)
 state = state.unsqueeze(0)
 state = actor.transform(state)
+state = actor.stacking(state)
 writer.add_graph(learner.online_dqn, state)
 
 start_time = time.time()
