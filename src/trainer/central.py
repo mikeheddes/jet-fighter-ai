@@ -83,6 +83,7 @@ def main():
         if i_episode % 20 == 19:
             report_host_metrics(device)
             report_actor_metrics(actor, i_episode)
+            report_memory_metrics(memory)
 
         for transition in actor.episode():
             memory.add(transition)
