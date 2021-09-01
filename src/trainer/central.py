@@ -1,7 +1,7 @@
 import os
 import psutil
 import random
-from collections import namedtuple
+from collections import namedtuple, deque
 from itertools import count
 import gym
 import time
@@ -40,9 +40,6 @@ class Memory:
             self.wrap_arounds += 1
 
     def sample(self, batch_size=1):
-        assert len(
-            self.data) > batch_size, "Memory contains less data than batch_size"
-
         return random.sample(self.data, batch_size)
 
 
@@ -111,8 +108,56 @@ class SumTree:
             return self.retrieve(right, at_sum - self.nodes[left])
 
 
+def stack(frames, minlen=1):
+    padding = []
+    for _ in range(max(0, minlen - len(frames))):
+        padding.append(torch.zeros(
+            size=frames[0].shape,
+            dtype=frames[0].dtype,
+            device=frames[0].device))
+
+    frames = padding + frames
+    return torch.cat(frames, dim=1)
+
+
+def get_state_from_transitions(transitions):
+    start_idx = 0
+    for i in range(len(transitions) - 2, -1, -1):
+        if transitions.next_state is None:
+            start_idx = i + 1
+
+    state = [t.state for t in transitions[start_idx:]]
+    return stack(state, STACKING)
+
+
+def get_next_state_from_transitions(transitions):
+    if transitions[-1].next_state is None:
+        return None
+
+    start_idx = 0
+    for i in range(len(transitions) - 2, -1, -1):
+        if transitions.next_state is None:
+            start_idx = i + 1
+
+    next_state = [t.next_state for t in transitions[start_idx:]]
+    return stack(next_state, STACKING)
+
+
+def transition_from_memory(memory, index):
+    start_idx = max(0, index - STACKING + 1)
+    end_idx = index + 1
+
+    transition_stack = memory.data[start_idx:end_idx]
+    return Transition(
+        state=get_state_from_transitions(transition_stack),
+        action=transition_stack[-1].action,
+        reward=transition_stack[-1].reward,
+        next_state=get_next_state_from_transitions(transition_stack))
+
+
 class PrioritizedMemory:
-    def __init__(self, capacity, alpha=0.6, beta=0.4, epsilon=0.001):
+    def __init__(self, capacity, alpha=0.6, beta=0.4, epsilon=0.001, transform=None):
+        self.transform = transform
         self.alpha = alpha
         self.beta = beta
         self.epsilon = epsilon
@@ -153,7 +198,12 @@ class PrioritizedMemory:
             at_sum = random.random() * self.tree.sum
 
             index, priority = self.tree.get(at_sum)
-            transitions[i] = self.data[index]
+
+            if self.transform:
+                transitions[i] = self.transform(self, index)
+            else:
+                transitions[i] = self.data[index]
+
             sample_ids[i] = index + self.wrap_arounds * self.capacity
             probability = priority / self.tree.sum
             is_weights[i] = (len(self.data) * probability) ** -self.beta
@@ -186,7 +236,6 @@ class PrioritizedMemory:
         return torch.tensor(priorities, dtype=torch.float)
 
 
-
 class DQN(nn.Module):
     def __init__(self, state_size, num_actions):
         super(DQN, self).__init__()
@@ -216,6 +265,54 @@ class DQN(nn.Module):
         return value + advantage - mean_advantage
 
 
+class Grayscale(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.weights = nn.Parameter(torch.tensor(
+            [[[[1.0]]]],
+            dtype=torch.float), requires_grad=False)
+
+    def forward(self, x):
+        return (x * self.weights).sum(1, keepdims=True)
+
+
+class Downscale(nn.Module):
+    def __init__(self, channels):
+        super().__init__()
+        self.weights = nn.Parameter(torch.full(
+            (channels, channels, 1, 1), 1.0,
+            dtype=torch.float), requires_grad=False)
+
+    def forward(self, x):
+        return F.conv2d(x, weight=self.weights, stride=1)
+
+
+class Transform(nn.Module):
+    def __init__(self, channels):
+        super().__init__()
+        self.gray = Grayscale()
+        self.downscaling = Downscale(channels)
+
+    def forward(self, x):
+        out = self.gray(x)
+        out = self.downscaling(out)
+        return out
+
+
+class StackingBuffer:
+    def __init__(self, num_frames):
+        super().__init__()
+        self.num_frames = num_frames
+        self.buffer = deque(maxlen=num_frames)
+
+    def reset(self):
+        self.buffer.clear()
+
+    def __call__(self, frame):
+        self.buffer.append(frame)
+        return stack(list(self.buffer), self.num_frames)
+
+
 BATCH_SIZE = 128
 GAMMA = 0.99
 EPS_START = 1.0
@@ -225,8 +322,8 @@ LEARNING_RATE = 0.001
 C, H, W = 1, 1, 4
 NUM_ACTIONS = 2
 STACKING = 1
-MEMORY_SIZE = 10_000
-TARGET_NET_UPDATE_FREQ = 100
+MEMORY_SIZE = 100_000
+TARGET_NET_UPDATE_FREQ = 1000
 NUM_STEPS = 150_000
 
 os.makedirs("../checkpoints/", exist_ok=True)
@@ -257,11 +354,12 @@ writer = SummaryWriter(f'../runs/dqn_cartpole/{version}/')
 # }, {}, run_name="/")
 
 
-memory = PrioritizedMemory(MEMORY_SIZE)
+memory = PrioritizedMemory(MEMORY_SIZE, transform=transition_from_memory)
 
 
 class Learner:
     def __init__(self, device=None):
+        self.device = device
         self.online_dqn = DQN((1, C * STACKING, H, W), NUM_ACTIONS).to(device)
         self.target_dqn = DQN((1, C * STACKING, H, W), NUM_ACTIONS).to(device)
         self.update_target_model()
@@ -290,16 +388,17 @@ class Learner:
         non_final_mask = [s is not None for s in batch.next_state]
         non_final_mask = torch.tensor(
             non_final_mask,
-            device=device,
+            device=self.device,
             dtype=torch.bool)
         non_final_next_states = [s for s in batch.next_state if s is not None]
-        non_final_next_states = torch.cat(non_final_next_states).to(device)
-        state_batch = torch.cat(batch.state).to(device)
+        non_final_next_states = torch.cat(
+            non_final_next_states).to(self.device)
+        state_batch = torch.cat(batch.state).to(self.device)
         action_batch = torch.tensor(
-            batch.action, device=device, dtype=torch.int64)
+            batch.action, device=self.device, dtype=torch.int64)
         action_batch = action_batch.view(BATCH_SIZE, 1)
         reward_batch = torch.tensor(
-            batch.reward, device=device, dtype=torch.float)
+            batch.reward, device=self.device, dtype=torch.float)
         reward_batch = reward_batch.view(BATCH_SIZE, 1)
 
         # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
@@ -311,7 +410,8 @@ class Learner:
         with torch.no_grad():
             non_final_next_actions = self.online_dqn(
                 non_final_next_states).argmax(1, keepdims=True)
-            next_state_values = torch.zeros((BATCH_SIZE, 1), device=device)
+            next_state_values = torch.zeros(
+                (BATCH_SIZE, 1), device=self.device)
             next_state_values[non_final_mask] = self.target_dqn(
                 non_final_next_states).gather(1, non_final_next_actions)
             expected_q_values = reward_batch + (next_state_values * GAMMA)
@@ -320,13 +420,14 @@ class Learner:
         for batch_i in range(BATCH_SIZE):
             memory.update_priority(sample_ids[batch_i], errors[batch_i].item())
 
+        is_weights = is_weights.to(self.device)
         losses = self.loss_fn(q_values, expected_q_values) * is_weights
         loss = losses.mean()
 
         # Optimize the model
         self.optimizer.zero_grad()
         loss.backward()
-        nn.utils.clip_grad_norm_(self.online_dqn.parameters(), 1)
+        nn.utils.clip_grad_norm_(self.online_dqn.parameters(), 1.0)
         self.optimizer.step()
 
         if step % 500 == 499:
@@ -361,6 +462,9 @@ class Actor:
         else:
             self.model = model
 
+        self.transform = Transform(C).to(device)
+        self.stacking = StackingBuffer(STACKING)
+
     def policy(self, state):
         global step
         sample = random.random()
@@ -373,9 +477,13 @@ class Actor:
             return random.randint(0, NUM_ACTIONS - 1)
 
     def episode(self):
+        self.stacking.reset()
         state = self.env.reset()
-        state = torch.tensor(state, dtype=torch.float)
-        state = state.view(1, C, H, W).to(self.device)
+        state = torch.tensor(state, dtype=torch.float, device=self.device)
+        state = state.view(1, C, H, W)
+        state = self.transform(state)
+        frame = state
+        state = self.stacking(state)
 
         while True:
             action = self.policy(state)
@@ -384,20 +492,24 @@ class Actor:
             if done:
                 next_state = None
             else:
-                next_state = torch.tensor(next_state, dtype=torch.float)
-                next_state = next_state.view(
-                    1, C, H, W).to(self.device)
+                next_state = torch.tensor(
+                    next_state, dtype=torch.float, device=self.device)
+                next_state = next_state.view(1, C, H, W)
+                next_state = self.transform(next_state)
+                next_frame = next_state
+                next_state = self.stacking(next_state)
 
             yield Transition(
-                state.to("cpu"),
+                frame.cpu(),
                 action,
                 reward,
-                next_state.to("cpu") if next_state is not None else next_state)
+                next_frame.cpu() if next_state is not None else next_state)
 
             if done:
                 return
 
             state = next_state
+            frame = next_frame
 
     def update_model(self, state_dict):
         self.model.load_state_dict(state_dict)
@@ -422,21 +534,27 @@ class Rollout(Actor):
         return self.total_value / self.frames
 
 
+step = 0
+
 gpu_mem = torch.cuda.memory_allocated(device) / 1e6
 process = psutil.Process(os.getpid())
 cpu_mem = process.memory_info().rss / 1e6
 print(f"Start script, using {gpu_mem:.2f} MB GPU and {cpu_mem:.2f} MB CPU")
+writer.add_scalar("host/gpu_memory_usage", gpu_mem, step)
+writer.add_scalar("host/cpu_memory_usage", cpu_mem, step)
+writer.add_scalar("actor/num_episodes", 0, step)
 
-learner = Learner()
-actor = Actor(model=learner.online_dqn)
-rollout = Rollout(model=learner.online_dqn)
+learner = Learner(device=device)
+actor = Actor(model=learner.online_dqn, device=device)
+rollout = Rollout(model=learner.online_dqn, device=device)
 
 state = actor.env.reset()
-state = torch.tensor(state, dtype=torch.float)
+state = torch.tensor(state, dtype=torch.float, device=device)
 state = state.view(1, C, H, W)
+state = actor.transform(state)
+state = actor.stacking(state)
 writer.add_graph(learner.online_dqn, state)
 
-step = 0
 start_time = time.time()
 for i_episode in count():
     if step >= NUM_STEPS:
@@ -473,7 +591,8 @@ for i_episode in count():
               f"\tmean value: {episode_mean_value:.1f}", "\tat episode", i_episode, f"\tat {(time.time() - start_time):.1f}s")
 
         writer.add_scalar("memory/length", len(memory), step)
-        writer.add_histogram("memory/priorities", memory.get_all_priorities(), step)
+        writer.add_histogram("memory/priorities",
+                             memory.get_all_priorities(), step)
 
     if i_episode % 50 == 49:
         torch.save({
