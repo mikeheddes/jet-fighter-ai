@@ -1,7 +1,6 @@
 import random
 
-
-class Memory:
+class UniformMemory:
     def __init__(self, capacity):
         self.capacity = capacity
         self.wrap_arounds = 0
@@ -21,8 +20,5 @@ class Memory:
         if self.write_index == 0:
             self.wrap_arounds += 1
 
-    def __getitem__(self, idx):
-        return self.data[idx]
-
-    def sample(self):
-        return random.randint(0, len(self.data) - 1)
+    def sample(self, batch_size=1):
+        return random.sample(self.data, batch_size)
