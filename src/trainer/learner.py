@@ -1,10 +1,11 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import ray
 
 from .types import Transition
 from .model import DQN
-from .globals import variables, writer, BATCH_SIZE, STACKING, C, H, W, NUM_ACTIONS, LEARNING_RATE, GAMMA, TARGET_NET_UPDATE_FREQ
+from .globals import BATCH_SIZE, STACKING, C, H, W, NUM_ACTIONS, LEARNING_RATE, GAMMA, TARGET_NET_UPDATE_FREQ
 
 class Learner:
     def __init__(self, device=None):
@@ -17,15 +18,20 @@ class Learner:
         self.optimizer = optim.RMSprop(parameters, lr=LEARNING_RATE)
         self.loss_fn = nn.MSELoss(reduction='none')
 
+        self.commons = ray.get_actor("commons")
+
     def update_target_model(self):
         state_dict = self.online_dqn.state_dict()
         self.target_dqn.load_state_dict(state_dict)
 
     def step(self, memory):
-        if len(memory) < 1000:
+        # TODO: Cache call and invalidate every n-calls 
+        # until memory is long enough,
+        # then cache value forever.
+        if ray.get(memory.__len__.remote()) < 1000:
             return
 
-        transitions, sample_ids, is_weights = memory.sample(BATCH_SIZE)
+        transitions, sample_ids, is_weights = ray.get(memory.sample.remote(BATCH_SIZE))
         # Transpose the batch (see https://stackoverflow.com/a/19343/3343043 for
         # detailed explanation). This converts batch-array of Transitions
         # to Transition of batch-arrays.
@@ -64,9 +70,8 @@ class Learner:
                 non_final_next_states).gather(1, non_final_next_actions)
             expected_q_values = reward_batch + (next_state_values * GAMMA)
 
-        errors = torch.abs(q_values - expected_q_values)
-        for batch_i in range(BATCH_SIZE):
-            memory.update_priority(sample_ids[batch_i], errors[batch_i].item())
+        errors = torch.abs(q_values - expected_q_values).view(BATCH_SIZE)
+        memory.update_priorities.remote(sample_ids, errors.tolist())
 
         is_weights = is_weights.to(self.device)
         losses = self.loss_fn(q_values, expected_q_values) * is_weights
@@ -78,18 +83,21 @@ class Learner:
         nn.utils.clip_grad_norm_(self.online_dqn.parameters(), 1.0)
         self.optimizer.step()
 
-        step = variables.get_step()
+        # TODO use internal value counter for step
+        # update the commons counter every n-calls
+        step = ray.get(self.commons.get_step.remote())
         if step % 500 == 499:
-            print(f"Loss: {loss.item():.4g}, \t at step {step}")
-            writer.add_scalar("learner/loss", loss, step)
+            self.commons.write_scalar.remote("learner/loss", loss)
 
             state_dict = self.online_dqn.state_dict()
             for tensor_name in state_dict:
                 tag = f"learner/{tensor_name}"
                 tensor = state_dict[tensor_name]
-                writer.add_histogram(tag, tensor, step)
+                self.commons.write_histogram.remote(tag, tensor)
 
         if step % TARGET_NET_UPDATE_FREQ == TARGET_NET_UPDATE_FREQ - 1:
             self.update_target_model()
 
-        variables.set_step(step + 1)
+        # TODO use internal value counter for step
+        # update the commons counter every n-calls
+        self.commons.set_step.remote(step + 1)

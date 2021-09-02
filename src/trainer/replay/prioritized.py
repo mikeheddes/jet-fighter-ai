@@ -1,9 +1,11 @@
 import torch
 import random
+import ray
 
 from .sumtree import SumTree
 
 
+@ray.remote
 class PrioritizedMemory:
     def __init__(self, capacity, alpha=0.6, beta=0.4, epsilon=0.001, transform=None):
         self.transform = transform
@@ -19,6 +21,7 @@ class PrioritizedMemory:
 
         # metrics
         self.num_updates = 0
+        self.commons = ray.get_actor("commons")
 
     def __len__(self):
         return len(self.data)
@@ -82,6 +85,10 @@ class PrioritizedMemory:
         priority = self.get_priority(error)
         self.tree.update(index, priority)
 
+    def update_priorities(self, sample_ids, errors):
+        for sample_id, error in zip(sample_ids, errors):
+            self.update_priority(sample_id, error)
+
     def sample_id_to_index(self, sample_id):
         return sample_id % self.capacity
 
@@ -94,3 +101,15 @@ class PrioritizedMemory:
 
     def get_total_updated(self):
         return self.num_updates
+
+    def report_metrics(self):
+        self.commons.write_scalar.remote("memory/length", len(self))
+
+        priorities = self.get_all_priorities()
+        self.commons.write_histogram.remote("memory/priorities", priorities)
+
+        num_adds = self.get_total_added()
+        self.commons.write_scalar.remote("memory/num_adds", num_adds)
+
+        num_updates = self.get_total_updated()
+        self.commons.write_scalar.remote("memory/num_updates", num_updates)

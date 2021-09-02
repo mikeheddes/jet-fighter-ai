@@ -1,6 +1,7 @@
 from torch.utils.tensorboard import SummaryWriter
 import datetime
 import os
+import ray
 
 BATCH_SIZE = 128
 GAMMA = 0.99
@@ -15,16 +16,17 @@ MEMORY_SIZE = 100_000
 TARGET_NET_UPDATE_FREQ = 500
 NUM_STEPS = 150_000
 
-os.makedirs("../runs/", exist_ok=True)
 
-timezone = datetime.timezone.utc
-current_date = datetime.datetime.now(timezone)
-version = current_date.strftime("d%Y_%m_%d-t%H_%M_%S")
-writer = SummaryWriter(f'../runs/dqn_cartpole/{version}/')
-
-class VariableHandler:
+@ray.remote
+class Commons:
     def __init__(self):
         self.step = 0
+
+        os.makedirs("../runs/", exist_ok=True)
+        timezone = datetime.timezone.utc
+        current_date = datetime.datetime.now(timezone)
+        version = current_date.strftime("d%Y_%m_%d-t%H_%M_%S")
+        self.writer = SummaryWriter(f'../runs/dqn_cartpole/{version}/')
 
     def get_step(self):
         return self.step
@@ -32,5 +34,15 @@ class VariableHandler:
     def set_step(self, step):
         self.step = step
 
+    def write_scalar(self, *args, **kwargs):
+        self.writer.add_scalar(*args, **kwargs, global_step=self.step)
 
-variables = VariableHandler()
+    def write_histogram(self, *args, **kwargs):
+        self.writer.add_histogram(*args, **kwargs, global_step=self.step)
+
+    def write_video(self, *args, **kwargs):
+        self.writer.add_video(*args, **kwargs, global_step=self.step)
+
+    def write_graph(self, *args, **kwargs):
+        self.writer.add_graph(*args, **kwargs)
+
