@@ -43,19 +43,12 @@ void main() {
 FRAGMENT_SHADER = '''
 #version 330
 
-uniform float isDead;
-uniform float isSecondAnimationStep;
-
 in vec3 v_color;
 
 out vec3 f_color;
 
 void main() {
-    if (isDead == 1.0 && isSecondAnimationStep == 0.0) {
-        f_color = vec3(0.6, 0.6, 0.6);
-    } else {
-        f_color = v_color;
-    }
+    f_color = v_color;
 }
 '''
 
@@ -67,11 +60,12 @@ class Plane:
     deadStepsPerAnimationLoop = 40
     fireLimit = 30  # steps
 
-    def __init__(self, x, y, angle, frameSize, color):
+    def __init__(self, x, y, angle, frameSize, color, dead_color):
         self.x = x
         self.y = y
         self.angle = angle
         self.color = color
+        self.dead_color = dead_color
         self.frameSize = frameSize
         self.state = PlaneState.ALIVE
         self.bullets = []
@@ -157,7 +151,6 @@ class Plane:
         width = self.frameSize.width
         height = self.frameSize.height
 
-
         if self.prog == None:
             self.prog = ctx.program(
                 vertex_shader=VERTEX_SHADER,
@@ -173,18 +166,15 @@ class Plane:
                 -2, 0,
             ), dtype="f4") / height * 2.0
             self.buffer = ctx.buffer(vertices)
-            self.vao = ctx.simple_vertex_array(self.prog, self.buffer, "in_vert")
-            self.prog['color'].write(self.color)
+            self.vao = ctx.simple_vertex_array(
+                self.prog, self.buffer, "in_vert")
             self.prog['stretch'].write(
                 np.array((height / width, 1.0), dtype='f4'))
 
-
+        self.prog['color'].write(
+            self.color if self.state != PlaneState.DEAD else self.dead_color)
         self.prog['rot'].write(Matrix44.from_eulers(
             (0.0, -self.angle, 0.0), dtype='f4'))
-        self.prog['isDead'].write(
-            np.array(self.state == PlaneState.DEAD, dtype="f4"))
-        self.prog['isSecondAnimationStep'].write(
-            np.array(self.deadStepCounter % self.deadStepsPerAnimationLoop > self.deadStepsPerAnimationLoop / 2, dtype="f4"))
 
         def _draw(x, y):
             self.prog['move'].write(np.array((
@@ -194,7 +184,8 @@ class Plane:
             self.vao.render(moderngl.TRIANGLES)
 
         _draw(self.x, self.y)
-        inEdgeArea = getInEdgeArea(self.x, self.y, self.borderBox, self.frameSize)
+        inEdgeArea = getInEdgeArea(
+            self.x, self.y, self.borderBox, self.frameSize)
         if inEdgeArea.top:
             _draw(self.x, self.y + height)
         if inEdgeArea.left:
