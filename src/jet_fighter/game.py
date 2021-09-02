@@ -20,8 +20,12 @@ WIDTH = 240
 HEIGHT = 180
 # BLUE = '#0066ff'
 BLUE = np.array((0.0, 0.4, 1.0), dtype="f4")
+# BLUE = '#336699'
+DEAD_BLUE = np.array((0.2, 0.4, 0.6), dtype="f4")
 # RED = '#ff3333'
 RED = np.array((1.0, 0.2, 0.2), dtype="f4")
+# RED = '#993333'
+DEAD_RED = np.array((0.6, 0.2, 0.2), dtype="f4")
 
 FrameSize = namedtuple("FrameSize", ("width", "height"))
 
@@ -30,11 +34,11 @@ class JetFighter:
     def __init__(self, width, height):
         self.frameSize = FrameSize(width, height)
 
-    def resetPlane(self, color):
+    def resetPlane(self, color, dead_color):
         x = random.random() * self.frameSize.width
         y = random.random() * self.frameSize.height
         angle = random.random() * math.pi * 2.0
-        return Plane(x, y, angle, self.frameSize, color)
+        return Plane(x, y, angle, self.frameSize, color, dead_color)
 
     def reset(self):
         if hasattr(self, "planes"):
@@ -42,7 +46,8 @@ class JetFighter:
                 del plane
 
         self.score = [0, 0]
-        self.planes = [self.resetPlane(BLUE), self.resetPlane(RED)]
+        self.planes = [self.resetPlane(
+            BLUE, DEAD_BLUE), self.resetPlane(RED, DEAD_RED)]
 
     def step(self, actions):
         for index in range(len(self.planes)):
@@ -138,8 +143,18 @@ class App(moderngl_window.WindowConfig):
         self.last_score = self.game.score
         # self.frame_num = 0
 
-    def render(self, time, frame_time):
-        self.game.step([random.randint(0, 3), random.randint(0, 3)])
+        self.action_repeat_counter = [0, 0]
+        self.actions = [0, 0]
+
+    def render(self, current_time, frame_time):
+        for i in range(2):
+            if self.action_repeat_counter[i] <= 0:
+                self.action_repeat_counter[i] = random.randint(1, 120)
+                self.actions[i] = random.randint(0, 3)
+
+            self.action_repeat_counter[i] -= 1
+
+        self.game.step(self.actions)
         score_change = [
             self.game.score[0] - self.last_score[0],
             self.game.score[1] - self.last_score[1],
@@ -150,6 +165,7 @@ class App(moderngl_window.WindowConfig):
             print(self.game.score)
         self.last_score = self.game.score
         self.game.draw(self.ctx)
+        # time.sleep(0.1)
         # self.frame_num += 1
 
         # if self.frame_num == 240:
