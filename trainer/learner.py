@@ -2,11 +2,14 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import ray
+import time
 
 from .types import Transition
 from .model import DQN
-from .globals import BATCH_SIZE, STACKING, C, H, W, NUM_ACTIONS, LEARNING_RATE, GAMMA, TARGET_NET_UPDATE_FREQ
+from .globals import BATCH_SIZE, NUM_STEPS, STACKING, C, H, W, NUM_ACTIONS, LEARNING_RATE, GAMMA, TARGET_NET_UPDATE_FREQ, MIN_MEMORY_SIZE
 
+
+@ray.remote
 class Learner:
     def __init__(self, device=None):
         self.device = device
@@ -19,19 +22,46 @@ class Learner:
         self.loss_fn = nn.MSELoss(reduction='none')
 
         self.commons = ray.get_actor("commons")
+        self.internal_step_count = ray.get(self.commons.get_step.remote())
+        self.update_step_countdown = 0
+
+        self.cached_is_memory_sufficiently_full = False
+        self.fetch_memory_size_countdown = 0
+
+        self.update_global_model()
 
     def update_target_model(self):
         state_dict = self.online_dqn.state_dict()
         self.target_dqn.load_state_dict(state_dict)
 
-    def step(self, memory):
-        # TODO: Cache call and invalidate every n-calls 
-        # until memory is long enough,
-        # then cache value forever.
-        if ray.get(memory.__len__.remote()) < 1000:
-            return
+    def set_step_count(self, count):
+        self.internal_step_count = count
+        self.update_step_countdown -= 1
 
-        transitions, sample_ids, is_weights = ray.get(memory.sample.remote(BATCH_SIZE))
+        if self.update_step_countdown <= 0:
+            self.update_step_countdown = 50
+            self.commons.set_step.remote(self.internal_step_count)
+
+    def get_step_count(self):
+        return self.internal_step_count
+
+    def is_memory_sufficiently_full(self, memory):
+        if self.cached_is_memory_sufficiently_full:
+            return True
+
+        if self.fetch_memory_size_countdown <= 0:
+            self.fetch_memory_size_countdown = 100
+            self.cached_is_memory_sufficiently_full = ray.get(
+                memory.__len__.remote()) >= MIN_MEMORY_SIZE
+
+        self.fetch_memory_size_countdown -= 1
+        return self.cached_is_memory_sufficiently_full
+
+    def update_global_model(self):
+        self.commons.set_model_state_dict.remote(
+            self.online_dqn.state_dict())
+
+    def step(self, transitions, sample_ids, is_weights, memory):
         # Transpose the batch (see https://stackoverflow.com/a/19343/3343043 for
         # detailed explanation). This converts batch-array of Transitions
         # to Transition of batch-arrays.
@@ -83,9 +113,7 @@ class Learner:
         nn.utils.clip_grad_norm_(self.online_dqn.parameters(), 1.0)
         self.optimizer.step()
 
-        # TODO use internal value counter for step
-        # update the commons counter every n-calls
-        step = ray.get(self.commons.get_step.remote())
+        step = self.get_step_count()
         if step % 500 == 499:
             self.commons.write_scalar.remote("learner/loss", loss)
 
@@ -97,7 +125,25 @@ class Learner:
 
         if step % TARGET_NET_UPDATE_FREQ == TARGET_NET_UPDATE_FREQ - 1:
             self.update_target_model()
+            self.update_global_model()
 
-        # TODO use internal value counter for step
-        # update the commons counter every n-calls
-        self.commons.set_step.remote(step + 1)
+        if step % 5000 == 4999:
+            torch.save({
+                'steps': step,
+                'model_state_dict': self.online_dqn.state_dict(),
+                'optimizer_state_dict': self.optimizer.state_dict()
+            }, "./checkpoints/training.pt")
+
+        self.set_step_count(step + 1)
+
+    def train(self):
+        memory = ray.get_actor("memory")
+
+        while not self.is_memory_sufficiently_full(memory):
+            time.sleep(0.01)
+
+        fetch_batch = memory.sample.remote(BATCH_SIZE)
+        for _ in range(NUM_STEPS):
+            transitions, sample_ids, is_weights = ray.get(fetch_batch)
+            fetch_batch = memory.sample.remote(BATCH_SIZE)
+            self.step(transitions, sample_ids, is_weights, memory)

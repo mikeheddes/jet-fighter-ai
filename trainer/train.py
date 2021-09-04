@@ -25,8 +25,9 @@ def report_host_metrics(device):
     commons.write_scalar.remote("host/cpu_memory_usage", cpu_mem)
 
 
-def main():
+def main():    
     ray.init()
+    os.makedirs("./checkpoints/", exist_ok=True)
 
     device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
     print("Using:", device)
@@ -34,9 +35,9 @@ def main():
     commons = Commons.options(name="commons").remote()
     memory = PrioritizedMemory.options(name="memory").remote(
         MEMORY_SIZE, transform=transition_from_memory)
-    learner = Learner(device=device)
-    actor = Actor(model=learner.online_dqn, device=device)
-    rollout = Rollout(model=learner.online_dqn, device=device)
+    learner = Learner.options(name="learner").remote(device=device)
+    actor = Actor(device="cpu")
+    rollout = Rollout(device="cpu")
 
     report_host_metrics(device)
 
@@ -45,36 +46,34 @@ def main():
     state = state.view(1, C, H, W)
     state = actor.transform(state)
     state = actor.stacking(state)
-    commons.write_graph.remote(learner.online_dqn, state)
+    commons.write_graph.remote(actor.model, state)
+
+    learner.train.remote()
 
     for i_episode in count():
         # TODO: Cache call and invalidate every n-calls
-        step = ray.get(commons.get_step.remote())
-        if step >= NUM_STEPS:
-            break
+        # step = ray.get(commons.get_step.remote())
+        # if step >= NUM_STEPS:
+        #     break
 
         if i_episode % 20 == 19:
             report_host_metrics(device)
             actor.report_metrics(i_episode)
             memory.report_metrics.remote()
 
-        for transition in actor.episode():
-            memory.add.remote(transition)
-            learner.step(memory)
+        transitions = list(actor.episode())
+        memory.add_batch.remote(transitions)
+        time.sleep(0.1)
 
         if i_episode % 5 == 4:
-            for transition in rollout.episode():
-                memory.add.remote(transition)
+            model_state_dict = ray.get(commons.get_model_state_dict.remote())
+            rollout.update_model(model_state_dict)
+            actor.update_model(model_state_dict)
 
+            transitions = list(rollout.episode())
+            memory.add_batch.remote(transitions)
             rollout.report_metrics(i_episode)
-
-        if i_episode % 50 == 49:
-            step = ray.get(commons.get_step.remote())
-            torch.save({
-                'steps': step,
-                'model_state_dict': learner.online_dqn.state_dict(),
-                'optimizer_state_dict': learner.optimizer.state_dict()
-            }, "../checkpoints/training.pt")
+            time.sleep(0.1)
 
     actor.env.close()
     rollout.env.close()

@@ -26,15 +26,15 @@ class PrioritizedMemory:
     def __len__(self):
         return len(self.data)
 
-    def add(self, item, error=None):
+    def add(self, item):
         if self.wrap_arounds == 0:
             self.data.append(item)
         else:
             self.data[self.write_index] = item
 
         # Set average error if None
-        if error is None:
-            error = (self.tree.sum / len(self.data)) ** (1 / self.alpha)
+        # if error is None:
+        error = (self.tree.sum / len(self.data)) ** (1 / self.alpha)
 
         priority = self.get_priority(error)
         self.tree.update(self.write_index, priority)
@@ -43,6 +43,10 @@ class PrioritizedMemory:
         self.write_index = (self.write_index + 1) % self.capacity
         if self.write_index == 0:
             self.wrap_arounds += 1
+
+    def add_batch(self, items):
+        for item in items:
+            self.add(item)
 
     def sample(self, batch_size=1):
         transitions = [None] * batch_size

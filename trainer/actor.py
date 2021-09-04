@@ -26,9 +26,20 @@ class Actor:
         self.stacking = StackingBuffer(STACKING)
         self.reward_sequence = []
         self.frame_sequence = []
+        self.action_sequence = []
         self.frame_idx = 0
 
         self.commons = ray.get_actor("commons")
+
+        self.get_step_countdown = 0
+
+    def get_step(self):
+        if self.get_step_countdown <= 0:
+            self.get_step_countdown = 100
+            self.cached_step = ray.get(self.commons.get_step.remote())
+
+        self.get_step_countdown -= 1
+        return self.cached_step
 
     def get_eps_threshold(self, step):
         part = 1. - min(step / EPS_DECAY, 1.)
@@ -36,9 +47,7 @@ class Actor:
 
     def policy(self, state):
         sample = random.random()
-
-        # TODO: Cache call and invalidate every n-calls
-        step = ray.get(self.commons.get_step.remote())
+        step = self.get_step()
         if sample > self.get_eps_threshold(step):
             with torch.no_grad():
                 return self.model(state).argmax().item()
@@ -48,6 +57,7 @@ class Actor:
     def episode(self):
         self.reward_sequence = []
         self.frame_sequence = []
+        self.action_sequence = []
         self.frame_idx = 0
 
         self.stacking.reset()
@@ -64,6 +74,7 @@ class Actor:
 
             self.reward_sequence.append(reward)
             self.frame_sequence.append(frame)
+            self.action_sequence.append(action)
 
             if done:
                 next_state = None
@@ -94,10 +105,11 @@ class Actor:
     def report_metrics(self, episode_idx):
         rewards = torch.tensor(self.reward_sequence)
         self.commons.write_histogram.remote("actor/episode_rewards", rewards)
-
+        actions = torch.tensor(self.action_sequence)
+        self.commons.write_histogram.remote("actor/episode_actions", actions)
         self.commons.write_scalar.remote("actor/num_episodes", episode_idx)
 
-        step = ray.get(self.commons.get_step.remote())
+        step = self.get_step()
         self.commons.write_scalar.remote(
             "actor/epsilon", self.get_eps_threshold(step))
 
@@ -105,8 +117,7 @@ class Actor:
         memory = ray.get_actor("memory")
 
         for i_episode in count():
-            # TODO: Cache call and invalidate every n-calls
-            step = ray.get(self.commons.get_step.remote())
+            step = self.get_step()
             if step >= NUM_STEPS:
                 break
 
@@ -134,15 +145,15 @@ class Rollout(Actor):
         return self.total_value / self.frame_idx
 
     def report_metrics(self, episode_idx):
-        commons = ray.get_actor("commons")
-
         rewards = torch.tensor(self.reward_sequence)
-        commons.write_histogram.remote("rollout/episode_rewards", rewards)
+        self.commons.write_histogram.remote("rollout/episode_rewards", rewards)
+        actions = torch.tensor(self.action_sequence)
+        self.commons.write_histogram.remote("rollout/episode_actions", actions)
 
-        commons.write_scalar.remote(
+        self.commons.write_scalar.remote(
             "rollout/episode_total_reward", rewards.sum())
-        commons.write_scalar.remote(
+        self.commons.write_scalar.remote(
             "rollout/episode_mean_value", self.mean_value)
 
         frames = torch.stack(self.frame_sequence, dim=1)
-        commons.write_video.remote("rollout/episode", frames, fps=4)
+        self.commons.write_video.remote("rollout/episode", frames, fps=4)

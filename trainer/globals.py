@@ -6,13 +6,14 @@ import ray
 BATCH_SIZE = 128
 GAMMA = 0.99
 EPS_START = 1.0
-EPS_END = 0.05
+EPS_END = 0.5
 EPS_DECAY = 20_000
 LEARNING_RATE = 0.001
 C, H, W = 1, 1, 4
 NUM_ACTIONS = 2
 STACKING = 1
 MEMORY_SIZE = 100_000
+MIN_MEMORY_SIZE = 1_000
 TARGET_NET_UPDATE_FREQ = 500
 NUM_STEPS = 150_000
 
@@ -22,17 +23,23 @@ class Commons:
     def __init__(self):
         self.step = 0
 
-        os.makedirs("../runs/", exist_ok=True)
+        os.makedirs("./runs/", exist_ok=True)
         timezone = datetime.timezone.utc
         current_date = datetime.datetime.now(timezone)
         version = current_date.strftime("d%Y_%m_%d-t%H_%M_%S")
-        self.writer = SummaryWriter(f'../runs/dqn_cartpole/{version}/')
+        self.writer = SummaryWriter(f'./runs/cartpole/{version}/')
 
     def get_step(self):
         return self.step
 
     def set_step(self, step):
         self.step = step
+
+    def get_model_state_dict(self):
+        return self.model_state_dict
+
+    def set_model_state_dict(self, state_dict):
+        self.model_state_dict = state_dict
 
     def write_scalar(self, *args, **kwargs):
         self.writer.add_scalar(*args, **kwargs, global_step=self.step)
