@@ -20,12 +20,12 @@ WIDTH = 240
 HEIGHT = 180
 # BLUE = '#0066ff'
 BLUE = np.array((0.0, 0.4, 1.0), dtype="f4")
-# BLUE = '#336699'
-DEAD_BLUE = np.array((0.2, 0.4, 0.6), dtype="f4")
+DEAD_BLUE = '#003366'
+DEAD_BLUE = np.array((0.0, 0.2, 0.4), dtype="f4")
 # RED = '#ff3333'
 RED = np.array((1.0, 0.2, 0.2), dtype="f4")
-# RED = '#993333'
-DEAD_RED = np.array((0.6, 0.2, 0.2), dtype="f4")
+DEAD_RED = '#660000'
+DEAD_RED = np.array((0.4, 0.0, 0.0), dtype="f4")
 
 FrameSize = namedtuple("FrameSize", ("width", "height"))
 
