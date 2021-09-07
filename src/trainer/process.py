@@ -22,7 +22,7 @@ def stack(frames, minlen=1):
 def get_state_from_transitions(transitions):
     start_idx = 0
     for i in range(len(transitions) - 2, -1, -1):
-        if transitions.next_state is None:
+        if transitions[i].next_state is None:
             start_idx = i + 1
 
     state = [t.state for t in transitions[start_idx:]]
@@ -35,7 +35,7 @@ def get_next_state_from_transitions(transitions):
 
     start_idx = 0
     for i in range(len(transitions) - 2, -1, -1):
-        if transitions.next_state is None:
+        if transitions[i].next_state is None:
             start_idx = i + 1
 
     next_state = [t.next_state for t in transitions[start_idx:]]
