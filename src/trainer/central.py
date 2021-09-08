@@ -1,6 +1,7 @@
 import os
 import psutil
 from itertools import count
+import argparse
 
 import torch
 
@@ -9,6 +10,14 @@ from .learner import Learner
 from .actor import Actor, Rollout
 from .globals import variables, writer, MEMORY_SIZE, C, H, W, NUM_STEPS
 from .process import transition_from_memory
+
+
+def get_preferred_device():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--device", default="cuda:0")
+
+    return parser.parse_args().device
 
 
 def report_memory_metrics(memory):
@@ -59,7 +68,8 @@ def report_actor_metrics(actor, episode_idx):
 
 
 def main():
-    device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
+    device = get_preferred_device() if torch.cuda.is_available() else "cpu"
+    device = torch.device(device)
     print("Using:", device)
 
     report_host_metrics(device)
