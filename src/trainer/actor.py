@@ -4,14 +4,16 @@ import torch
 
 from .model import DQN
 from .types import Transition
-from .settings import variables, STACKING, C, H, W, NUM_ACTIONS, EPS_DECAY, EPS_START, EPS_END
+from .settings import variables, STACKING, C, H, W, NUM_ACTIONS, EPS_DECAY
 from .process import StackingBuffer
+
+EPS_START = 1.0
+EPS_END = 0.05
 
 
 class Actor:
     def __init__(self, model=None, device=None):
         self.device = device
-        self.env = self.get_env()
 
         if model is None:
             self.model = DQN(
@@ -24,6 +26,8 @@ class Actor:
         self.reward_sequence = []
         self.frame_sequence = []
         self.frame_idx = 0
+
+        self.env = self.get_env()
 
     def get_env(self):
         raise NotImplementedError
