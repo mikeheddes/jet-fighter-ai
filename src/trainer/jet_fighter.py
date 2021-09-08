@@ -176,7 +176,7 @@ def main():
             for transition in rollout.episode():
                 memory.add(transition)
 
-        report_rollout_metrics(rollout)
+            report_rollout_metrics(rollout)
 
         if i_episode % 50 == 49:
             torch.save({
