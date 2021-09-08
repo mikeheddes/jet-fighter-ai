@@ -172,9 +172,9 @@ def main():
             memory.add(transition)
             learner.step(memory)
 
-        # if i_episode % 5 == 4:
-        for transition in rollout.episode():
-            memory.add(transition)
+        if i_episode % 5 == 4:
+            for transition in rollout.episode():
+                memory.add(transition)
 
         report_rollout_metrics(rollout)
 

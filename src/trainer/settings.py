@@ -2,16 +2,16 @@ from torch.utils.tensorboard import SummaryWriter
 import datetime
 import os
 
-BATCH_SIZE = 128
-GAMMA = 0.99
-EPS_DECAY = 20_000
-LEARNING_RATE = 0.0005
+BATCH_SIZE = 32
+GAMMA = 0.997
+EPS_DECAY = 5_000_000
+LEARNING_RATE = 0.00025
 C, H, W = 1, 90, 120
-NUM_ACTIONS = 2
+NUM_ACTIONS = 4
 STACKING = 4
-MEMORY_SIZE = 100_000
-TARGET_NET_UPDATE_FREQ = 500
-NUM_STEPS = 150_000
+MEMORY_SIZE = 500_000
+TARGET_NET_UPDATE_FREQ = 5000
+NUM_STEPS = 500_000_000
 
 os.makedirs("../runs/", exist_ok=True)
 
