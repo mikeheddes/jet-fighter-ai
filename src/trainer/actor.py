@@ -4,14 +4,14 @@ import torch
 
 from .model import DQN
 from .types import Transition
-from .globals import variables, STACKING, C, H, W, NUM_ACTIONS, EPS_DECAY, EPS_START, EPS_END
-from .process import Transform, StackingBuffer
+from .settings import variables, STACKING, C, H, W, NUM_ACTIONS, EPS_DECAY, EPS_START, EPS_END
+from .process import StackingBuffer
 
 
 class Actor:
     def __init__(self, model=None, device=None):
         self.device = device
-        self.env = gym.make('CartPole-v1')
+        self.env = self.get_env()
 
         if model is None:
             self.model = DQN(
@@ -20,11 +20,16 @@ class Actor:
         else:
             self.model = model
 
-        self.transform = Transform(C).to(device)
         self.stacking = StackingBuffer(STACKING)
         self.reward_sequence = []
         self.frame_sequence = []
         self.frame_idx = 0
+
+    def get_env(self):
+        raise NotImplementedError
+
+    def get_frame(self, raw_state):
+        raise NotImplementedError
 
     def get_eps_threshold(self, step):
         part = 1. - min(step / EPS_DECAY, 1.)
@@ -46,11 +51,8 @@ class Actor:
 
         self.stacking.reset()
         state = self.env.reset()
-        state = torch.tensor(state, dtype=torch.float, device=self.device)
-        state = state.view(1, C, H, W)
-        state = self.transform(state)
-        frame = state
-        state = self.stacking(state)
+        frame = self.get_frame(state)
+        state = self.stacking(frame)
 
         while True:
             action = self.policy(state)
@@ -61,13 +63,10 @@ class Actor:
 
             if done:
                 next_state = None
+                next_frame = None
             else:
-                next_state = torch.tensor(
-                    next_state, dtype=torch.float, device=self.device)
-                next_state = next_state.view(1, C, H, W)
-                next_state = self.transform(next_state)
-                next_frame = next_state
-                next_state = self.stacking(next_state)
+                next_frame = self.get_frame(next_state)
+                next_state = self.stacking(next_frame)
 
             yield Transition(
                 frame.cpu(),

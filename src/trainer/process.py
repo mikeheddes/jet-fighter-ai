@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from collections import deque
 
 from .types import Transition
-from .globals import STACKING
+from .settings import STACKING
 
 
 def stack(frames, minlen=1):
@@ -52,40 +52,6 @@ def transition_from_memory(memory, index):
         action=transition_stack[-1].action,
         reward=transition_stack[-1].reward,
         next_state=get_next_state_from_transitions(transition_stack))
-
-
-class Grayscale(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.weights = nn.Parameter(torch.tensor(
-            [[[[1.0]]]],
-            dtype=torch.float), requires_grad=False)
-
-    def forward(self, x):
-        return (x * self.weights).sum(1, keepdims=True)
-
-
-class Downscale(nn.Module):
-    def __init__(self, channels):
-        super().__init__()
-        self.weights = nn.Parameter(torch.full(
-            (channels, channels, 1, 1), 1.0,
-            dtype=torch.float), requires_grad=False)
-
-    def forward(self, x):
-        return F.conv2d(x, weight=self.weights, stride=1)
-
-
-class Transform(nn.Module):
-    def __init__(self, channels):
-        super().__init__()
-        self.gray = Grayscale()
-        self.downscaling = Downscale(channels)
-
-    def forward(self, x):
-        out = self.gray(x)
-        out = self.downscaling(out)
-        return out
 
 
 class StackingBuffer:

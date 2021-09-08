@@ -4,7 +4,7 @@ import torch.optim as optim
 
 from .types import Transition
 from .model import DQN
-from .globals import variables, writer, BATCH_SIZE, STACKING, C, H, W, NUM_ACTIONS, LEARNING_RATE, GAMMA, TARGET_NET_UPDATE_FREQ
+from .settings import variables, BATCH_SIZE, STACKING, C, H, W, NUM_ACTIONS, LEARNING_RATE, GAMMA, TARGET_NET_UPDATE_FREQ
 
 class Learner:
     def __init__(self, device=None):
@@ -81,13 +81,13 @@ class Learner:
         step = variables.get_step()
         if step % 500 == 499:
             print(f"Loss: {loss.item():.4g}, \t at step {step}")
-            writer.add_scalar("learner/loss", loss, step)
+            variables.writer.add_scalar("learner/loss", loss, step)
 
             state_dict = self.online_dqn.state_dict()
             for tensor_name in state_dict:
                 tag = f"learner/{tensor_name}"
                 tensor = state_dict[tensor_name]
-                writer.add_histogram(tag, tensor, step)
+                variables.writer.add_histogram(tag, tensor, step)
 
         if step % TARGET_NET_UPDATE_FREQ == TARGET_NET_UPDATE_FREQ - 1:
             self.update_target_model()

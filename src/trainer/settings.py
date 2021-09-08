@@ -17,14 +17,16 @@ NUM_STEPS = 150_000
 
 os.makedirs("../runs/", exist_ok=True)
 
-timezone = datetime.timezone.utc
-current_date = datetime.datetime.now(timezone)
-version = current_date.strftime("d%Y_%m_%d-t%H_%M_%S")
-writer = SummaryWriter(f'../runs/dqn_cartpole/{version}/')
 
 class VariableHandler:
     def __init__(self):
         self.step = 0
+
+    def init_writer(self, name):
+        timezone = datetime.timezone.utc
+        current_date = datetime.datetime.now(timezone)
+        version = current_date.strftime("d%Y_%m_%d-t%H_%M_%S")
+        self.writer = SummaryWriter(os.path.join("../runs", name, version))
 
     def get_step(self):
         return self.step
