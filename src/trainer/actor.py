@@ -1,4 +1,3 @@
-import gym
 import random
 import torch
 
