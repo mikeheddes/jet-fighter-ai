@@ -11,8 +11,9 @@ EPS_END = 0.05
 
 
 class Actor:
-    def __init__(self, model=None, device=None):
+    def __init__(self, step, model=None, device=None):
         self.device = device
+        self.step = step
 
         if model is None:
             self.model = DQN(
@@ -40,8 +41,7 @@ class Actor:
 
     def policy(self, state):
         sample = random.random()
-        step = variables.get_step()
-        if sample > self.get_eps_threshold(step):
+        if sample > self.get_eps_threshold(self.step.value):
             with torch.no_grad():
                 return self.model(state).argmax().item()
         else:

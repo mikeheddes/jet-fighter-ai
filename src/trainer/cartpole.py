@@ -1,16 +1,24 @@
 import os
+from queue import Empty
 import psutil
 from itertools import count
 import argparse
 import gym
+from torch.utils.tensorboard import SummaryWriter
+import datetime
+import os
+
 
 import torch
+import torch.multiprocessing as mp
 
 from .replay.prioritized import PrioritizedMemory
 from .learner import Learner
 from .actor import Actor as BaseActor, Rollout as BaseRollout
-from .settings import variables, MEMORY_SIZE, C, H, W, NUM_STEPS
+from .settings import BATCH_SIZE, MEMORY_SIZE, C, H, W, NUM_STEPS, NUM_ACTORS
 from .process import transition_from_memory
+from .utils import do_every
+
 
 class CartPoleActor:
     def get_env(self):
@@ -38,101 +46,159 @@ def get_preferred_device():
     return parser.parse_args().device
 
 
-def report_memory_metrics(memory):
-    step = variables.get_step()
-    variables.writer.add_scalar("memory/length", len(memory), step)
+def memory_metrics(memory, step):
+    yield ("scalar", "memory/length", len(memory), step.value)
 
     priorities = memory.get_all_priorities()
-    variables.writer.add_histogram("memory/priorities", priorities, step)
+    yield ("histogram", "memory/priorities", priorities, step.value)
 
     num_adds = memory.get_total_added()
-    variables.writer.add_scalar("memory/num_adds", num_adds, step)
+    yield ("scalar", "memory/num_adds", num_adds, step.value)
 
     num_updates = memory.get_total_updated()
-    variables.writer.add_scalar("memory/num_updates", num_updates, step)
+    yield ("scalar", "memory/num_updates", num_updates, step.value)
 
 
-def report_host_metrics(device):
-    step = variables.get_step()
+def host_metrics(device, step):
     gpu_mem = torch.cuda.memory_allocated(device) / 1e6
-    variables.writer.add_scalar("host/gpu_memory_usage", gpu_mem, step)
+    yield ("scalar", "host/gpu_memory_usage", gpu_mem, step.value)
 
     process = psutil.Process(os.getpid())
     cpu_mem = process.memory_info().rss / 1e6
-    variables.writer.add_scalar("host/cpu_memory_usage", cpu_mem, step)
+    yield ("scalar", "host/cpu_memory_usage", cpu_mem, step.value)
 
 
-def report_rollout_metrics(rollout):
-    step = variables.get_step()
+def learner_metrics(learner, step):
+    yield ("scalar", "learner/loss", learner.last_loss, step.value)
+
+    state_dict = learner.online_dqn.state_dict()
+    for tensor_name in state_dict:
+        tag = f"learner/{tensor_name}"
+        tensor = state_dict[tensor_name]
+        yield ("histogram", tag, tensor, step.value)
+
+
+def rollout_metrics(rollout, step):
     rewards = torch.tensor(rollout.reward_sequence)
-    variables.writer.add_histogram("rollout/episode_rewards", rewards, step)
+    yield ("histogram", "rollout/episode_rewards", rewards, step.value)
 
-    variables.writer.add_scalar("rollout/episode_total_reward", rewards.sum(), step)
+    yield ("scalar", "rollout/episode_total_reward", rewards.sum(), step.value)
 
     episode_mean_value = rollout.mean_value
-    variables.writer.add_scalar("rollout/episode_mean_value", episode_mean_value, step)
+    yield ("scalar", "rollout/episode_mean_value", episode_mean_value, step.value)
 
     frames = torch.stack(rollout.frame_sequence, dim=1)
-    variables.writer.add_video("rollout/episode", frames, step, fps=4)
+    fps = 4
+    yield ("video", "rollout/episode", frames, step.value, fps)
 
 
-def report_actor_metrics(actor, episode_idx):
-    step = variables.get_step()
+def actor_metrics(actor, episode_idx, step):
     rewards = torch.tensor(actor.reward_sequence)
-    variables.writer.add_histogram("actor/episode_rewards", rewards, step)
+    yield ("histogram", "actor/episode_rewards", rewards, step.value)
+    yield ("scalar", "actor/num_episodes", episode_idx, step.value)
+    yield ("scalar", "actor/epsilon", actor.get_eps_threshold(step.value), step.value)
 
-    variables.writer.add_scalar("actor/num_episodes", episode_idx, step)
-    variables.writer.add_scalar("actor/epsilon", actor.get_eps_threshold(step), step)
+
+def run_actor(transition_queue, metric_queue, step):
+    actor = Actor(step, device="cpu")
+    for i_episode in count():
+        for transition in actor.episode():
+            transition_queue.put(transition)
+
+        if i_episode % 20 == 19:
+            for metric in actor_metrics(actor, i_episode, step):
+                metric_queue.put(metric)
+
+
+def run_writer(metric_queue: mp.Queue, name):
+    timezone = datetime.timezone.utc
+    current_date = datetime.datetime.now(timezone)
+    version = current_date.strftime("d%Y_%m_%d-t%H_%M_%S")
+    writer = SummaryWriter(os.path.join("../runs", name, version))
+
+    while True:
+        metric = metric_queue.get()
+        m_type = metric[0]
+        if m_type == "histogram":
+            writer.add_histogram(*metric[1:])
+        if m_type == "scalar":
+            writer.add_scalar(*metric[1:])
+        if m_type == "video":
+            writer.add_video(*metric[1:])
+        if m_type == "graph":
+            writer.add_graph(*metric[1:])
 
 
 def main():
-    variables.init_writer('cartpole')
+    mp.set_start_method("spawn")
+
+    step = mp.Value('i', 0)
+    metric_queue = mp.Queue()
+    metric_p = mp.Process(
+        target=run_writer,
+        args=(metric_queue, 'cartpole'))
+    metric_p.start()
 
     device = get_preferred_device() if torch.cuda.is_available() else "cpu"
     device = torch.device(device)
     print("Using:", device)
 
-    report_host_metrics(device)
+    for metric in host_metrics(device, step):
+        metric_queue.put(metric)
 
     memory = PrioritizedMemory(MEMORY_SIZE, transform=transition_from_memory)
-    learner = Learner(device=device)
-    actor = Actor(model=learner.online_dqn, device=device)
-    rollout = Rollout(model=learner.online_dqn, device=device)
+    learner = Learner(step, device=device)
+    rollout = Rollout(step, model=learner.online_dqn, device=device)
 
-    state = actor.env.reset()
-    frame = actor.get_frame(state)
-    state = actor.stacking(frame)
-    variables.writer.add_graph(learner.online_dqn, state)
+    transition_queue = mp.Queue(maxsize=2 * BATCH_SIZE * NUM_ACTORS)
+    actor_p = mp.Process(
+        target=run_actor,
+        args=(transition_queue, metric_queue, step))
+    actor_p.start()
 
-    for i_episode in count():
-        if variables.get_step() >= NUM_STEPS:
+    state = rollout.env.reset()
+    frame = rollout.get_frame(state)
+    state = rollout.stacking(frame)
+    metric_queue.put(("graph", learner.online_dqn, state))
+
+    while True:
+        if step.value >= NUM_STEPS:
             break
 
-        if i_episode % 20 == 19:
-            report_host_metrics(device)
-            report_actor_metrics(actor, i_episode)
-            report_memory_metrics(memory)
+        if do_every(10_000, step.value):
+            for metric in host_metrics(device, step):
+                metric_queue.put(metric)
+            for metric in memory_metrics(memory, step):
+                metric_queue.put(metric)
 
-        for transition in actor.episode():
+        try:
+            transition = transition_queue.get_nowait()
             memory.add(transition)
-            learner.step(memory)
+        except Empty as e:
+            pass
+        learner.step(memory, step)
 
-        if i_episode % 5 == 4:
+        if do_every(500, step.value):
+            for metric in learner_metrics(learner, step):
+                metric_queue.put(metric)
+
+        if do_every(2_500, step.value):
             for transition in rollout.episode():
                 memory.add(transition)
 
-            report_rollout_metrics(rollout)
+            for metric in rollout_metrics(rollout, step):
+                metric_queue.put(metric)
 
-        if i_episode % 50 == 49:
+        if do_every(25_000, step.value):
             torch.save({
-                'steps': variables.get_step(),
+                'steps': step.value,
                 'model_state_dict': learner.online_dqn.state_dict(),
                 'optimizer_state_dict': learner.optimizer.state_dict()
             }, "../checkpoints/traininpt")
 
-    actor.env.close()
     rollout.env.close()
-    variables.writer.close()
+    actor_p.kill()
+    actor_p.close()
 
 
 if __name__ == "__main__":

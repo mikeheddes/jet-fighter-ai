@@ -2,13 +2,17 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
+from .utils import do_every
 from .types import Transition
 from .model import DQN
-from .settings import variables, BATCH_SIZE, STACKING, C, H, W, NUM_ACTIONS, LEARNING_RATE, GAMMA, TARGET_NET_UPDATE_FREQ
+from .settings import BATCH_SIZE, STACKING, C, H, W, NUM_ACTIONS, LEARNING_RATE, GAMMA, TARGET_NET_UPDATE_FREQ
+
 
 class Learner:
-    def __init__(self, device=None):
+    def __init__(self, step, device=None):
+        self.step_count = step
         self.device = device
+
         self.online_dqn = DQN((1, C * STACKING, H, W), NUM_ACTIONS).to(device)
         self.target_dqn = DQN((1, C * STACKING, H, W), NUM_ACTIONS).to(device)
         self.update_target_model()
@@ -16,6 +20,8 @@ class Learner:
         parameters = self.online_dqn.parameters()
         self.optimizer = optim.RMSprop(parameters, lr=LEARNING_RATE)
         self.loss_fn = nn.MSELoss(reduction='none')
+
+        self.last_loss = 0.0
 
     def update_target_model(self):
         state_dict = self.online_dqn.state_dict()
@@ -64,13 +70,15 @@ class Learner:
                 non_final_next_states).gather(1, non_final_next_actions)
             expected_q_values = reward_batch + (next_state_values * GAMMA)
 
-        errors = torch.abs(q_values - expected_q_values)
-        for batch_i in range(BATCH_SIZE):
-            memory.update_priority(sample_ids[batch_i], errors[batch_i].item())
+        with torch.no_grad():
+            errors = torch.abs(q_values - expected_q_values)
+            for batch_i in range(BATCH_SIZE):
+                memory.update_priority(sample_ids[batch_i], errors[batch_i].item())
 
         is_weights = is_weights.to(self.device)
         losses = self.loss_fn(q_values, expected_q_values) * is_weights
         loss = losses.mean()
+        self.last_loss = loss.item()
 
         # Optimize the model
         self.optimizer.zero_grad()
@@ -78,18 +86,8 @@ class Learner:
         nn.utils.clip_grad_norm_(self.online_dqn.parameters(), 1.0)
         self.optimizer.step()
 
-        step = variables.get_step()
-        if step % 500 == 499:
-            print(f"Loss: {loss.item():.4g}, \t at step {step}")
-            variables.writer.add_scalar("learner/loss", loss, step)
-
-            state_dict = self.online_dqn.state_dict()
-            for tensor_name in state_dict:
-                tag = f"learner/{tensor_name}"
-                tensor = state_dict[tensor_name]
-                variables.writer.add_histogram(tag, tensor, step)
-
-        if step % TARGET_NET_UPDATE_FREQ == TARGET_NET_UPDATE_FREQ - 1:
+        if do_every(TARGET_NET_UPDATE_FREQ, self.step_count.value):
             self.update_target_model()
 
-        variables.set_step(step + 1)
+        with self.step_count.get_lock():
+            self.step_count.value += 1

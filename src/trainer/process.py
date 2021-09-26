@@ -1,6 +1,4 @@
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 from collections import deque
 
 from .types import Transition
@@ -24,6 +22,7 @@ def get_state_from_transitions(transitions):
     for i in range(len(transitions) - 2, -1, -1):
         if transitions[i].next_state is None:
             start_idx = i + 1
+            break
 
     state = [t.state for t in transitions[start_idx:]]
     return stack(state, STACKING)
@@ -37,6 +36,7 @@ def get_next_state_from_transitions(transitions):
     for i in range(len(transitions) - 2, -1, -1):
         if transitions[i].next_state is None:
             start_idx = i + 1
+            break
 
     next_state = [t.next_state for t in transitions[start_idx:]]
     return stack(next_state, STACKING)
