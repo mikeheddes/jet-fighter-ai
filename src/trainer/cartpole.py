@@ -7,11 +7,12 @@ import torch.multiprocessing as mp
 from .replay.prioritized import PrioritizedMemory
 from .learner import Learner
 from .actor import Actor as BaseActor, Rollout as BaseRollout, run_actor
-from .settings import BATCH_SIZE, MEMORY_SIZE, C, H, W, NUM_STEPS, NUM_ACTORS, STACKING, NUM_ACTIONS
+from .settings import BATCH_SIZE, MEMORY_SIZE, C, H, MIN_MEMORY_SIZE, W, NUM_STEPS, NUM_ACTORS, STACKING, NUM_ACTIONS
 from .process import transition_from_memory
 from .utils import do_every, run_writer, get_preferred_device, host_metrics
 from .model import DQN
 from .types import Transition
+
 
 class CartPoleActor:
     def get_env(self):
@@ -84,7 +85,14 @@ def main():
             ))
         except Empty:
             pass
-        learner.step(memory)
+
+        if len(memory) > MIN_MEMORY_SIZE:
+            transitions, sample_ids, is_weights = memory.sample(BATCH_SIZE)
+            batch = Transition(*zip(*transitions))
+            errors = learner.step(batch, is_weights)
+            for batch_i in range(BATCH_SIZE):
+                memory.update_priority(
+                    sample_ids[batch_i], errors[batch_i].item())
 
         if do_every(500, step.value):
             for metric in learner.metrics(step):

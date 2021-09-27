@@ -27,16 +27,7 @@ class Learner:
         state_dict = self.online_dqn.state_dict()
         self.target_dqn.load_state_dict(state_dict)
 
-    def step(self, memory):
-        if len(memory) < 1000:
-            return
-
-        transitions, sample_ids, is_weights = memory.sample(BATCH_SIZE)
-        # Transpose the batch (see https://stackoverflow.com/a/19343/3343043 for
-        # detailed explanation). This converts batch-array of Transitions
-        # to Transition of batch-arrays.
-        batch = Transition(*zip(*transitions))
-
+    def get_prediction_and_expectation(self, batch):
         # Compute a mask of non-final states and concatenate the batch elements
         # (a final state would've been the one after which simulation ended)
         non_final_mask = [s is not None for s in batch.next_state]
@@ -70,13 +61,16 @@ class Learner:
                 non_final_next_states).gather(1, non_final_next_actions)
             expected_q_values = reward_batch + (next_state_values * GAMMA)
 
+        return q_values, expected_q_values
+
+    def step(self, batch, is_weights):
+        pred, expected = self.get_prediction_and_expectation(batch)
+
         with torch.no_grad():
-            errors = torch.abs(q_values - expected_q_values)
-            for batch_i in range(BATCH_SIZE):
-                memory.update_priority(sample_ids[batch_i], errors[batch_i].item())
+            errors = torch.abs(pred - expected)
 
         is_weights = is_weights.to(self.device)
-        losses = self.loss_fn(q_values, expected_q_values) * is_weights
+        losses = self.loss_fn(pred, expected) * is_weights
         loss = losses.mean()
         self.last_loss = loss.item()
 
@@ -91,6 +85,8 @@ class Learner:
 
         with self.step_count.get_lock():
             self.step_count.value += 1
+
+        return errors
 
 
     def metrics(self, step):
