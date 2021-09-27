@@ -1,9 +1,10 @@
 import random
 import torch
+from itertools import count
 
 from .model import DQN
 from .types import Transition
-from .settings import variables, STACKING, C, H, W, NUM_ACTIONS, EPS_DECAY
+from .settings import STACKING, C, H, W, NUM_ACTIONS, EPS_DECAY
 from .process import StackingBuffer
 
 EPS_START = 1.0
@@ -87,6 +88,24 @@ class Actor:
     def update_model(self, state_dict):
         self.model.load_state_dict(state_dict)
 
+    def metrics(self, episode_idx, step):
+        rewards = torch.tensor(self.reward_sequence)
+        yield ("histogram", "actor/episode_rewards", rewards, step.value)
+        yield ("scalar", "actor/num_episodes", episode_idx, step.value)
+        yield ("scalar", "actor/epsilon", self.get_eps_threshold(step.value), step.value)
+
+
+def run_actor(actor_cls, transition_queue, metric_queue, step):
+    actor = actor_cls(step, device="cpu")
+    
+    for i_episode in count():
+        for transition in actor.episode():
+            transition_queue.put(transition)
+
+        if i_episode % 20 == 19:
+            for metric in actor.metrics(i_episode, step):
+                metric_queue.put(metric)
+
 
 class Rollout(Actor):
     def policy(self, state):
@@ -102,3 +121,16 @@ class Rollout(Actor):
     @property
     def mean_value(self):
         return self.total_value / self.frame_idx
+
+    def metrics(self, step, fps=4):
+        rewards = torch.tensor(self.reward_sequence)
+        yield ("histogram", "rollout/episode_rewards", rewards, step.value)
+
+        yield ("scalar", "rollout/episode_total_reward", rewards.sum(), step.value)
+
+        episode_mean_value = self.mean_value
+        yield ("scalar", "rollout/episode_mean_value", episode_mean_value, step.value)
+
+        frames = torch.stack(self.frame_sequence, dim=1)
+        yield ("video", "rollout/episode", frames, step.value, fps)
+

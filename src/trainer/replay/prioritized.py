@@ -94,3 +94,16 @@ class PrioritizedMemory:
 
     def get_total_updated(self):
         return self.num_updates
+
+
+    def metrics(self, step):
+        yield ("scalar", "memory/length", len(self), step.value)
+
+        priorities = self.get_all_priorities()
+        yield ("histogram", "memory/priorities", priorities, step.value)
+
+        num_adds = self.get_total_added()
+        yield ("scalar", "memory/num_adds", num_adds, step.value)
+
+        num_updates = self.get_total_updated()
+        yield ("scalar", "memory/num_updates", num_updates, step.value)

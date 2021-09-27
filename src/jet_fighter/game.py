@@ -124,7 +124,7 @@ class HeadlessRenderer:
         self.render()
         self.frame_num += 1
         done = self.frame_num >= self.maxlen
-        return self.read_image(), reward, done, {}
+        return self.read_image(), float(reward), done, {}
 
 
 class App(moderngl_window.WindowConfig):

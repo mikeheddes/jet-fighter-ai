@@ -91,3 +91,13 @@ class Learner:
 
         with self.step_count.get_lock():
             self.step_count.value += 1
+
+
+    def metrics(self, step):
+        yield ("scalar", "learner/loss", self.last_loss, step.value)
+
+        state_dict = self.online_dqn.state_dict()
+        for tensor_name in state_dict:
+            tag = f"learner/{tensor_name}"
+            tensor = state_dict[tensor_name]
+            yield ("histogram", tag, tensor, step.value)
