@@ -2,7 +2,6 @@ import random
 import torch
 from itertools import count
 
-from .model import DQN
 from .types import Transition
 from .settings import STACKING, C, H, W, NUM_ACTIONS, EPS_DECAY
 from .process import StackingBuffer
@@ -12,12 +11,12 @@ EPS_END = 0.05
 
 
 class Actor:
-    def __init__(self, step, model=None, device=None):
+    def __init__(self, dqn_cls, step, model=None, device=None):
         self.device = device
         self.step = step
 
         if model is None:
-            self.model = DQN(
+            self.model = dqn_cls(
                 (STACKING * C, H, W),
                 NUM_ACTIONS).to(device)
         else:
@@ -95,8 +94,8 @@ class Actor:
         yield ("scalar", "actor/epsilon", self.get_eps_threshold(step.value), step.value)
 
 
-def run_actor(actor_cls, transition_queue, metric_queue, step):
-    actor = actor_cls(step, device="cpu")
+def run_actor(actor_cls, dqn_cls, transition_queue, metric_queue, step):
+    actor = actor_cls(dqn_cls, step, device="cpu")
     
     for i_episode in count():
         for transition in actor.episode():

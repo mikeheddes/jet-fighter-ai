@@ -1,20 +1,21 @@
-import os
-import psutil
-from itertools import count
-import argparse
 import math
-from jet_fighter.game import HeadlessRenderer as Environment
+from queue import Empty
+from jet_fighter.game import HeadlessRenderer as Env
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torchvision.transforms as T
+import torch.nn.functional as F
+import torch.multiprocessing as mp
 
 from .replay.prioritized import PrioritizedMemory
 from .learner import Learner
-from .actor import Actor as BaseActor, Rollout as BaseRollout
-from .settings import variables, MEMORY_SIZE, C, H, W, NUM_STEPS
+from .actor import Actor as BaseActor, Rollout as BaseRollout, run_actor
+from .settings import BATCH_SIZE, MEMORY_SIZE, C, H, MIN_MEMORY_SIZE, W, NUM_STEPS, NUM_ACTORS, STACKING, NUM_ACTIONS
 from .process import transition_from_memory
+from .utils import do_every, run_writer, get_preferred_device, host_metrics
+from .model import ConvDQN as DQN
+from .types import Transition
 
 
 class Grayscale(nn.Module):
@@ -42,18 +43,18 @@ class Downscale(nn.Module):
 class Transform(nn.Module):
     def __init__(self, channels):
         super().__init__()
-        self.gray = Grayscale()
+        # self.gray = Grayscale()
         self.downscaling = Downscale(channels)
         self.center_pos = (H, W)
 
     def forward(self, x, pos):
-        out = self.gray(x)
+        # out = self.gray(x)
         # Switch x, y to h, w
         shifts = (
             int(math.floor(self.center_pos[0] - pos[1])),
             int(math.floor(self.center_pos[1] - pos[0]))
         )
-        out = torch.roll(out, shifts=shifts, dims=(2, 3))
+        out = torch.roll(x, shifts=shifts, dims=(2, 3))
         out = self.downscaling(out)
 
         return out
@@ -62,10 +63,12 @@ class Transform(nn.Module):
 class JetFighterActor:
 
     def get_env(self):
+        # Only C as channels and not multiplied by STACKING
+        # because the transform is applied before stacking
         self.transform = Transform(C).to(self.device)
         self.toTensor = T.ToTensor()
 
-        return Environment()
+        return Env()
 
     def get_frame(self, raw_state):
         state = self.toTensor(raw_state).to(self.device)
@@ -82,112 +85,89 @@ class Rollout(JetFighterActor, BaseRollout):
     pass
 
 
-def get_preferred_device():
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument("--device", default="cuda:0")
-
-    return parser.parse_args().device
-
-
-def report_memory_metrics(memory):
-    step = variables.get_step()
-    variables.writer.add_scalar("memory/length", len(memory), step)
-
-    priorities = memory.get_all_priorities()
-    variables.writer.add_histogram("memory/priorities", priorities, step)
-
-    num_adds = memory.get_total_added()
-    variables.writer.add_scalar("memory/num_adds", num_adds, step)
-
-    num_updates = memory.get_total_updated()
-    variables.writer.add_scalar("memory/num_updates", num_updates, step)
-
-
-def report_host_metrics(device):
-    step = variables.get_step()
-    gpu_mem = torch.cuda.memory_allocated(device) / 1e6
-    variables.writer.add_scalar("host/gpu_memory_usage", gpu_mem, step)
-
-    process = psutil.Process(os.getpid())
-    cpu_mem = process.memory_info().rss / 1e6
-    variables.writer.add_scalar("host/cpu_memory_usage", cpu_mem, step)
-
-
-def report_rollout_metrics(rollout):
-    step = variables.get_step()
-    rewards = torch.tensor(rollout.reward_sequence)
-    variables.writer.add_histogram("rollout/episode_rewards", rewards, step)
-
-    variables.writer.add_scalar(
-        "rollout/episode_total_reward", rewards.sum(), step)
-
-    episode_mean_value = rollout.mean_value
-    variables.writer.add_scalar(
-        "rollout/episode_mean_value", episode_mean_value, step)
-
-    frames = torch.stack(rollout.frame_sequence, dim=1)
-    variables.writer.add_video("rollout/episode", frames, step, fps=30)
-
-
-def report_actor_metrics(actor, episode_idx):
-    step = variables.get_step()
-    rewards = torch.tensor(actor.reward_sequence)
-    variables.writer.add_histogram("actor/episode_rewards", rewards, step)
-
-    variables.writer.add_scalar("actor/num_episodes", episode_idx, step)
-    variables.writer.add_scalar(
-        "actor/epsilon", actor.get_eps_threshold(step), step)
-
-
 def main():
-    variables.init_writer('jet-fighter')
+    mp.set_start_method("spawn")
+
+    step = mp.Value('i', 0)
+    metric_q = mp.Queue()
+    metric_p = mp.Process(
+        target=run_writer,
+        args=(metric_q, 'jet-fighter'))
+    metric_p.start()
 
     device = get_preferred_device() if torch.cuda.is_available() else "cpu"
     device = torch.device(device)
     print("Using:", device)
 
-    report_host_metrics(device)
+    for metric in host_metrics(device, step):
+        metric_q.put(metric)
 
     memory = PrioritizedMemory(MEMORY_SIZE, transform=transition_from_memory)
-    learner = Learner(device=device)
-    actor = Actor(model=learner.online_dqn, device=device)
-    rollout = Rollout(model=learner.online_dqn, device=device)
+    learner = Learner(DQN, step, device=device)
+    rollout = Rollout(DQN, step, model=learner.online_dqn, device=device)
 
-    state = actor.env.reset()
-    frame = actor.get_frame(state)
-    state = actor.stacking(frame)
-    variables.writer.add_graph(learner.online_dqn, state)
+    transition_q = mp.Queue(maxsize=2 * BATCH_SIZE * NUM_ACTORS)
+    actor_p = mp.Process(
+        target=run_actor,
+        args=(Actor, DQN, transition_q, metric_q, step))
+    actor_p.start()
 
-    for i_episode in count():
-        if variables.get_step() >= NUM_STEPS:
+    state = rollout.env.reset()
+    frame = rollout.get_frame(state)
+    state = rollout.stacking(frame)
+    metric_q.put(("graph", DQN((C * STACKING, H, W), NUM_ACTIONS), state))
+
+    while True:
+        if step.value >= NUM_STEPS:
             break
 
-        if i_episode % 20 == 19:
-            report_host_metrics(device)
-            report_actor_metrics(actor, i_episode)
-            report_memory_metrics(memory)
+        if do_every(10_000, step.value):
+            for metric in host_metrics(device, step):
+                metric_q.put(metric)
+            for metric in memory.metrics(step):
+                metric_q.put(metric)
 
-        for transition in actor.episode():
-            memory.add(transition)
-            learner.step(memory)
+        try:
+            t = transition_q.get_nowait()
+            # Copy tensors to local memory
+            memory.add(Transition(
+                state=t.state.clone(),
+                action=t.action,
+                reward=t.reward,
+                next_state=t.next_state.clone() if t.next_state != None else None
+            ))
+        except Empty:
+            pass
 
-        if i_episode % 5 == 4:
+        if len(memory) > MIN_MEMORY_SIZE:
+            transitions, sample_ids, is_weights = memory.sample(BATCH_SIZE)
+            batch = Transition(*zip(*transitions))
+            errors = learner.step(batch, is_weights)
+            for batch_i in range(BATCH_SIZE):
+                memory.update_priority(
+                    sample_ids[batch_i], errors[batch_i].item())
+
+        if do_every(500, step.value):
+            for metric in learner.metrics(step):
+                metric_q.put(metric)
+
+        if do_every(1_000, step.value):
             for transition in rollout.episode():
                 memory.add(transition)
 
-            report_rollout_metrics(rollout)
+            for metric in rollout.metrics(step, fps=30):
+                metric_q.put(metric)
 
-        if i_episode % 50 == 49:
+        if do_every(25_000, step.value):
             torch.save({
-                'steps': variables.get_step(),
+                'steps': step.value,
                 'model_state_dict': learner.online_dqn.state_dict(),
                 'optimizer_state_dict': learner.optimizer.state_dict()
             }, "../checkpoints/traininpt")
 
-    actor.env.close()
     rollout.env.close()
-    variables.writer.close()
+    actor_p.kill()
+    actor_p.close()
 
 
 if __name__ == "__main__":

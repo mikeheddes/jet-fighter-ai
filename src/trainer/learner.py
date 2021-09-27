@@ -3,18 +3,16 @@ import torch.nn as nn
 import torch.optim as optim
 
 from .utils import do_every
-from .types import Transition
-from .model import DQN
 from .settings import BATCH_SIZE, STACKING, C, H, W, NUM_ACTIONS, LEARNING_RATE, GAMMA, TARGET_NET_UPDATE_FREQ
 
 
 class Learner:
-    def __init__(self, step, device=None):
+    def __init__(self, dqn_cls, step, device=None):
         self.step_count = step
         self.device = device
 
-        self.online_dqn = DQN((1, C * STACKING, H, W), NUM_ACTIONS).to(device)
-        self.target_dqn = DQN((1, C * STACKING, H, W), NUM_ACTIONS).to(device)
+        self.online_dqn = dqn_cls((C * STACKING, H, W), NUM_ACTIONS).to(device)
+        self.target_dqn = dqn_cls((C * STACKING, H, W), NUM_ACTIONS).to(device)
         self.update_target_model()
 
         parameters = self.online_dqn.parameters()

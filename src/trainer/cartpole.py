@@ -10,7 +10,7 @@ from .actor import Actor as BaseActor, Rollout as BaseRollout, run_actor
 from .settings import BATCH_SIZE, MEMORY_SIZE, C, H, MIN_MEMORY_SIZE, W, NUM_STEPS, NUM_ACTORS, STACKING, NUM_ACTIONS
 from .process import transition_from_memory
 from .utils import do_every, run_writer, get_preferred_device, host_metrics
-from .model import DQN
+from .model import LinearDQN as DQN
 from .types import Transition
 
 
@@ -50,13 +50,13 @@ def main():
         metric_q.put(metric)
 
     memory = PrioritizedMemory(MEMORY_SIZE, transform=transition_from_memory)
-    learner = Learner(step, device=device)
-    rollout = Rollout(step, model=learner.online_dqn, device=device)
+    learner = Learner(DQN, step, device=device)
+    rollout = Rollout(DQN, step, model=learner.online_dqn, device=device)
 
     transition_q = mp.Queue(maxsize=2 * BATCH_SIZE * NUM_ACTORS)
     actor_p = mp.Process(
         target=run_actor,
-        args=(Actor, transition_q, metric_q, step))
+        args=(Actor, DQN, transition_q, metric_q, step))
     actor_p.start()
 
     state = rollout.env.reset()
