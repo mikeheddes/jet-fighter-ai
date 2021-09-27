@@ -109,6 +109,9 @@ class HeadlessRenderer:
         self.render()
         return self.read_image()
 
+    def my_coordinates(self):
+        return self.game.planes[0].x, self.game.planes[0].y
+
     def step(self, action):
         self.game.step([action, random.randint(0, 3)])
 
@@ -121,7 +124,7 @@ class HeadlessRenderer:
         self.render()
         self.frame_num += 1
         done = self.frame_num >= self.maxlen
-        return self.read_image(), reward, done
+        return self.read_image(), reward, done, {}
 
 
 class App(moderngl_window.WindowConfig):
