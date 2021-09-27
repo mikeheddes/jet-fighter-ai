@@ -43,6 +43,7 @@ class Actor:
         sample = random.random()
         if sample > self.get_eps_threshold(self.step.value):
             with torch.no_grad():
+                state = state.to(self.device)
                 return self.model(state).argmax().item()
         else:
             return random.randint(0, NUM_ACTIONS - 1)
