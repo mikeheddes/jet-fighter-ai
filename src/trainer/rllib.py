@@ -1,6 +1,7 @@
 import ray
 from ray.rllib.agents import ppo
 from ray.tune.logger import pretty_print
+from itertools import count
 from .env import JetFighter
 
 
@@ -8,6 +9,7 @@ ray.init()
 
 
 config = ppo.DEFAULT_CONFIG.copy()
+config["num_gpus"] = 1
 config["num_workers"] = 6
 config["env_config"] = {}
 config["model"] = {
@@ -18,7 +20,7 @@ config["framework"] = "torch"
 trainer = ppo.PPOTrainer(env=JetFighter, config=config)
 # Can optionally call trainer.restore(path) to load a checkpoint.
 
-while True:
+for i in count():
     # Perform one iteration of training the policy with PPO
     result = trainer.train()
     print(pretty_print(result))
